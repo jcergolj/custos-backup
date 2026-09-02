@@ -1,4 +1,4 @@
-# Legio Backup
+# Praefectus Castrorum Posteriorum
 
 Daily backup script for Proton Drive.
 
@@ -40,8 +40,8 @@ proton-drive auth login
 
 ```bash
 mkdir -p ~/bin
-cp backup.sh ~/bin/legio-backup.sh
-chmod +x ~/bin/legio-backup.sh
+cp backup.sh ~/bin/praefectus-castrorum-posteriorum.sh
+chmod +x ~/bin/praefectus-castrorum-posteriorum.sh
 ```
 
 ## Use
@@ -49,13 +49,13 @@ chmod +x ~/bin/legio-backup.sh
 Default run:
 
 ```bash
-~/bin/legio-backup.sh
+~/bin/praefectus-castrorum-posteriorum.sh
 ```
 
 Custom Proton binary or size limit:
 
 ```bash
-PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M ~/bin/legio-backup.sh
+PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M ~/bin/praefectus-castrorum-posteriorum.sh
 ```
 
 ## Cron
@@ -63,7 +63,7 @@ PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M ~/bin/legio-backup.sh
 Run daily at `02:15`:
 
 ```cron
-15 2 * * * /home/YOUR_USER/bin/legio-backup.sh >> /tmp/legio-backup.log 2>&1
+15 2 * * * /home/YOUR_USER/bin/praefectus-castrorum-posteriorum.sh >> /tmp/praefectus-castrorum-posteriorum.log 2>&1
 ```
 
 ## Notes
