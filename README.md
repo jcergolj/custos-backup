@@ -12,6 +12,7 @@ Built-in limits:
 - skips files larger than `100M` by default
 - skips common heavy file types like archives, media, disk images, and DB files in `~/Downloads`
 - keeps backups for `7` days locally and remotely
+- uploads to `/backups/<computer-name>/<date>` in Proton Drive
 - uploads only when content changed
 
 ## Requirements
@@ -58,6 +59,12 @@ Custom Proton binary or size limit:
 PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M "$HOME/Praefectus castri posterioris/expedi.sh"
 ```
 
+Custom computer name or remote root:
+
+```bash
+COMPUTER_NAME=my-laptop REMOTE_ROOT=/backups/my-laptop "$HOME/Praefectus castri posterioris/expedi.sh"
+```
+
 ## Cron
 
 Run daily at `02:15`:
@@ -69,4 +76,4 @@ Run daily at `02:15`:
 ## Notes
 
 - Proton Drive CLI was not installed on this machine when this repo was created.
-- The script expects the remote folder in `REMOTE_DIR` to exist.
+- The script uploads to `/backups/<computer-name>/<date>` by default.

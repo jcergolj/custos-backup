@@ -2,11 +2,13 @@
 set -euo pipefail
 
 PROTON_BIN="${PROTON_BIN:-$HOME/bin/proton-drive}"
-REMOTE_DIR="${REMOTE_DIR:-/my-files/work-backups}"
+COMPUTER_NAME="${COMPUTER_NAME:-$(hostname)}"
+REMOTE_ROOT="${REMOTE_ROOT:-/backups/$COMPUTER_NAME}"
 STAGING_DIR="${STAGING_DIR:-$HOME/.local/share/work-backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 MAX_SIZE="${MAX_SIZE:-100M}"
 DATE="$(date +%F)"
+REMOTE_DIR="${REMOTE_DIR:-$REMOTE_ROOT/$DATE}"
 
 mkdir -p "$STAGING_DIR"
 
@@ -27,6 +29,29 @@ require_tools() {
     printf 'Missing required tool: jq\n' >&2
     exit 1
   }
+}
+
+ensure_remote_path() {
+  local path="$1"
+  local current=""
+  local part
+
+  IFS='/' read -r -a parts <<< "${path#/}"
+
+  for part in "${parts[@]}"; do
+    [ -n "$part" ] || continue
+
+    if [ -z "$current" ]; then
+      current="/$part"
+      "$PROTON_BIN" filesystem info "$current" >/dev/null 2>&1 || \
+        "$PROTON_BIN" filesystem create-folder / "$part" >/dev/null
+      continue
+    fi
+
+    "$PROTON_BIN" filesystem info "$current/$part" >/dev/null 2>&1 || \
+      "$PROTON_BIN" filesystem create-folder "$current" "$part" >/dev/null
+    current="$current/$part"
+  done
 }
 
 build_manifest() {
@@ -93,18 +118,16 @@ cleanup_local() {
 }
 
 cleanup_remote() {
-  "$PROTON_BIN" filesystem list "$REMOTE_DIR" --json 2>/dev/null \
+  "$PROTON_BIN" filesystem list "$REMOTE_ROOT" --json 2>/dev/null \
     | jq -r '.[].Name // empty' \
-    | grep -E '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}\.tar\.gz$' \
-    | while read -r file; do
-        file_date="${file#backup-}"
-        file_date="${file_date%.tar.gz}"
-        ts="$(date -d "$file_date" +%s 2>/dev/null || true)"
+    | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+    | while read -r folder_date; do
+        ts="$(date -d "$folder_date" +%s 2>/dev/null || true)"
 
         if [[ "$ts" =~ ^[0-9]+$ ]]; then
           age_days=$(( ( $(date +%s) - ts ) / 86400 ))
           if [ "$age_days" -gt "$RETENTION_DAYS" ]; then
-            "$PROTON_BIN" filesystem delete "$REMOTE_DIR/$file"
+            "$PROTON_BIN" filesystem delete "$REMOTE_ROOT/$folder_date"
           fi
         fi
       done
@@ -128,13 +151,14 @@ main() {
     exit 0
   fi
 
+  ensure_remote_path "$REMOTE_DIR"
   tar -czf "$ARCHIVE" -T "$MANIFEST"
   "$PROTON_BIN" filesystem upload "$ARCHIVE" "$REMOTE_DIR"
   printf '%s' "$current_hash" > "$HASH_FILE"
 
   cleanup_local
   cleanup_remote
-  printf 'Uploaded %s\n' "$ARCHIVE"
+  printf 'Uploaded %s to %s\n' "$ARCHIVE" "$REMOTE_DIR"
 }
 
 main "$@"
