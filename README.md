@@ -1,4 +1,4 @@
-# Praefectus Castrorum Posteriorum
+# Praefectus castri posterioris
 
 Daily backup script for Proton Drive.
 
@@ -39,9 +39,9 @@ proton-drive auth login
 ## Install
 
 ```bash
-mkdir -p ~/bin
-cp backup.sh ~/bin/praefectus-castrorum-posteriorum.sh
-chmod +x ~/bin/praefectus-castrorum-posteriorum.sh
+mkdir -p "$HOME/Praefectus castri posterioris"
+cp expedi.sh "$HOME/Praefectus castri posterioris/expedi.sh"
+chmod +x "$HOME/Praefectus castri posterioris/expedi.sh"
 ```
 
 ## Use
@@ -49,13 +49,13 @@ chmod +x ~/bin/praefectus-castrorum-posteriorum.sh
 Default run:
 
 ```bash
-~/bin/praefectus-castrorum-posteriorum.sh
+"$HOME/Praefectus castri posterioris/expedi.sh"
 ```
 
 Custom Proton binary or size limit:
 
 ```bash
-PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M ~/bin/praefectus-castrorum-posteriorum.sh
+PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M "$HOME/Praefectus castri posterioris/expedi.sh"
 ```
 
 ## Cron
@@ -63,7 +63,7 @@ PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M ~/bin/praefectus-castrorum-posteri
 Run daily at `02:15`:
 
 ```cron
-15 2 * * * /home/YOUR_USER/bin/praefectus-castrorum-posteriorum.sh >> /tmp/praefectus-castrorum-posteriorum.log 2>&1
+15 2 * * * "/home/YOUR_USER/Praefectus castri posterioris/expedi.sh" >> /tmp/praefectus-castri-posterioris.log 2>&1
 ```
 
 ## Notes
