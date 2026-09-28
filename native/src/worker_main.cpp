@@ -1,4 +1,5 @@
 #include "backupengine.h"
+#include "backupconfig.h"
 #include "localprovider.h"
 #include "protonprovider.h"
 #include "qprocessrunner.h"
@@ -11,24 +12,28 @@ int main(int argc, char *argv[])
     QCoreApplication application(argc, argv);
     QCommandLineParser parser;
     parser.addHelpOption();
-    parser.addOption({{"s", "source"}, QStringLiteral("Source directory."), QStringLiteral("path")});
-    parser.addOption({{"r", "remote"}, QStringLiteral("Remote destination."), QStringLiteral("path")});
+    parser.addOption({{"c", "config"}, QStringLiteral("Configuration file."), QStringLiteral("path")});
     parser.process(application);
 
-    const QString source = parser.value(QStringLiteral("source"));
-    const QString remote = parser.value(QStringLiteral("remote"));
-    if (source.isEmpty() || remote.isEmpty()) {
+    const QString configPath = parser.value(QStringLiteral("config"));
+    if (configPath.isEmpty()) {
         parser.showHelp(2);
     }
 
-    const QString protonBinary = qEnvironmentVariable("PRAEFECTUS_PROTON_BIN", QStringLiteral("proton-drive"));
-    QProcessRunner runner(protonBinary);
+    BackupConfig config;
+    QString error;
+    if (!BackupConfigStore(configPath).load(&config, &error)) {
+        qCritical().noquote() << error;
+
+        return 1;
+    }
+
+    QProcessRunner runner(config.protonBinary);
     ProtonProvider provider(runner);
     BackupEngine engine;
     QString manifestPath;
-    QString error;
 
-    if (!engine.backup(source, remote, provider, &manifestPath, &error)) {
+    if (!engine.backup(config.sourceDirectory, config.remoteRoot, provider, &manifestPath, &error)) {
         qCritical().noquote() << error;
 
         return 1;

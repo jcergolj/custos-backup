@@ -105,6 +105,14 @@ qt_add_executable(serviceinstaller-test
 target_link_libraries(serviceinstaller-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME serviceinstaller-test COMMAND serviceinstaller-test)
 
+qt_add_executable(backupconfig-test
+    tests/backupconfig_test.cpp
+    src/backupconfig.cpp
+)
+
+target_link_libraries(backupconfig-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME backupconfig-test COMMAND backupconfig-test)
+
 qt_add_executable(praefectus-native-install
     src/install_main.cpp
     src/serviceinstaller.cpp
