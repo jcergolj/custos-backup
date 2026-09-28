@@ -1,7 +1,7 @@
 # Maintainer: Praefectus contributors
 
 pkgname=praefectus-native-git
-pkgver=0.1.r29.g8196306
+pkgver=0.1.r1.g0000000
 pkgrel=1
 pkgdesc='Native Qt backup and selective restore client for Proton Drive'
 arch=('x86_64')

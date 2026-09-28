@@ -1,0 +1,17 @@
+pkgbase = praefectus-native-git
+	pkgdesc = Native Qt backup and selective restore client for Proton Drive
+	pkgver = 0.1.r1.g0000000
+	pkgrel = 1
+	url = https://github.com/jcergolj/praefectus-castri-posterioris
+	install = praefectus-native.install
+	arch = x86_64
+	license = MIT
+	makedepends = cmake
+	makedepends = gcc
+	depends = qt6-base
+	depends = qt6-declarative
+	optdepends = proton-drive: Proton Drive CLI used for backup storage
+	source = praefectus-native-git::git+https://github.com/jcergolj/praefectus-castri-posterioris.git
+	sha256sums = SKIP
+
+pkgname = praefectus-native-git
