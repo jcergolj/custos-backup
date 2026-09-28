@@ -10,6 +10,7 @@ SOURCES += \
     src/qprocessrunner.cpp \
     src/protonprovider.cpp
     src/backupjob.cpp
+    src/backupworker.cpp
 
 HEADERS += \
     src/backupengine.h \
@@ -19,5 +20,6 @@ HEADERS += \
     src/qprocessrunner.h \
     src/protonprovider.h
     src/backupjob.h
+    src/backupworker.h
 
 RESOURCES += qml.qrc
