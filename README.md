@@ -65,7 +65,8 @@ size and a non-verified SHA-1 digest instead, so backups verify the remote size
 and the manifest records the local SHA-256 for restore-time verification. The
 app never uses `empty-trash`.
 
-Start the application from the desktop menu or run:
+After installation, Praefectus appears in the Omarchy applications launcher
+opened with `Super+Space` as **Praefectus**. Start it there or run:
 
 ```bash
 praefectus-native

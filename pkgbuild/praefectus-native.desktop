@@ -4,6 +4,7 @@ Name=Praefectus
 GenericName=Backup Manager
 Comment=Back up selected files to Proton Drive
 Exec=praefectus-native
+TryExec=praefectus-native
 Icon=praefectus-native
 Terminal=false
 Categories=Utility;Archiving;System;
