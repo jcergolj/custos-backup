@@ -21,6 +21,7 @@ public:
 
     Q_INVOKABLE bool validateSelection(const QString &sourceDirectory, QString *error = nullptr) const;
     Q_INVOKABLE QStringList selectableFiles(const QString &sourceDirectory) const;
+    Q_INVOKABLE QString previewError(const QString &sourceDirectory) const;
     bool backup(const QString &sourceDirectory, const QString &remoteRoot, BackupProvider &provider, QString *manifestPath, QString *error = nullptr) const;
     bool restoreFile(const BackupEntry &entry, const QString &destinationDirectory, BackupProvider &provider, QString *error = nullptr) const;
 };

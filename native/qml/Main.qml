@@ -45,6 +45,25 @@ ApplicationWindow {
             }
         }
 
+        RowLayout {
+            Layout.fillWidth: true
+
+            TextField {
+                id: remoteField
+                placeholderText: qsTr("Remote backup folder")
+                text: "/my-files/backups/first-copy"
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: qsTr("Back up")
+                enabled: fileList.count > 0
+                onClicked: {
+                    statusLabel.text = qsTr("Backup is not connected to the Proton worker yet.")
+                }
+            }
+        }
+
         Label {
             id: statusLabel
             Layout.fillWidth: true

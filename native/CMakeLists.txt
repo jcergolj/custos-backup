@@ -16,6 +16,7 @@ qt_add_executable(praefectus-native
     src/localprovider.cpp
     src/qprocessrunner.cpp
     src/protonprovider.cpp
+    src/backupjob.cpp
     src/backupengine.h
 )
 
@@ -41,6 +42,7 @@ qt_add_executable(backupengine-test
     src/localprovider.cpp
     src/qprocessrunner.cpp
     src/protonprovider.cpp
+    src/backupjob.cpp
     src/backupengine.h
 )
 
@@ -54,3 +56,13 @@ qt_add_executable(protonprovider-test
 
 target_link_libraries(protonprovider-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME protonprovider-test COMMAND protonprovider-test)
+
+qt_add_executable(backupjob-test
+    tests/backupjob_test.cpp
+    src/backupjob.cpp
+    src/backupengine.cpp
+    src/localprovider.cpp
+)
+
+target_link_libraries(backupjob-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME backupjob-test COMMAND backupjob-test)

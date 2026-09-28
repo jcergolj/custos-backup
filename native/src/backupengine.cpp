@@ -72,6 +72,14 @@ QStringList BackupEngine::selectableFiles(const QString &sourceDirectory) const
     return files;
 }
 
+QString BackupEngine::previewError(const QString &sourceDirectory) const
+{
+    QString error;
+    validateSelection(sourceDirectory, &error);
+
+    return error;
+}
+
 bool BackupEngine::backup(const QString &sourceDirectory, const QString &remoteRoot, BackupProvider &provider, QString *manifestPath, QString *error) const
 {
     const QStringList files = selectableFiles(sourceDirectory);
