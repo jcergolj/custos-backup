@@ -10,6 +10,7 @@ struct BackupEntry {
     QString sourcePath;
     QString remotePath;
     qint64 size = 0;
+    QByteArray checksum;
 };
 
 class BackupEngine final : public QObject

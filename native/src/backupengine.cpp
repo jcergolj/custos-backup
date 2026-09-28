@@ -82,6 +82,17 @@ QString BackupEngine::previewError(const QString &sourceDirectory) const
 
 bool BackupEngine::backup(const QString &sourceDirectory, const QString &remoteRoot, BackupProvider &provider, QString *manifestPath, QString *error) const
 {
+    const QString normalizedRemoteRoot = QDir::cleanPath(remoteRoot);
+    if (normalizedRemoteRoot.isEmpty() || normalizedRemoteRoot == QStringLiteral(".")
+        || normalizedRemoteRoot == QStringLiteral("..") || normalizedRemoteRoot.startsWith(QStringLiteral("../"))
+        || normalizedRemoteRoot.contains(QStringLiteral("/../"))) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The remote backup folder is invalid.");
+        }
+
+        return false;
+    }
+
     const QStringList files = selectableFiles(sourceDirectory);
     if (files.isEmpty()) {
         if (error != nullptr) {
@@ -94,7 +105,7 @@ bool BackupEngine::backup(const QString &sourceDirectory, const QString &remoteR
     QJsonArray entries;
     for (const QString &sourcePath : files) {
         const QString relativePath = QDir(sourceDirectory).relativeFilePath(sourcePath);
-        const QString remotePath = QDir(remoteRoot).filePath(relativePath);
+        const QString remotePath = QDir(normalizedRemoteRoot).filePath(relativePath);
         QString providerError;
 
         if (!provider.upload(sourcePath, remotePath, &providerError)) {
@@ -125,7 +136,7 @@ bool BackupEngine::backup(const QString &sourceDirectory, const QString &remoteR
         });
     }
 
-    const QString path = QDir(remoteRoot).filePath(QStringLiteral("manifest.json"));
+    const QString path = QDir(normalizedRemoteRoot).filePath(QStringLiteral("manifest.json"));
     QDir().mkpath(QFileInfo(path).absolutePath());
     QSaveFile manifest(path);
     if (!manifest.open(QIODevice::WriteOnly)
@@ -155,9 +166,17 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         : entry.sourcePath;
     const QString destination = QDir(destinationDirectory).filePath(relativePath);
     const QString canonicalRoot = QFileInfo(destinationDirectory).canonicalFilePath();
-    const QString canonicalDestination = QFileInfo(destination).absoluteFilePath();
+    const QString destinationParent = QFileInfo(destination).absolutePath();
+    const QString canonicalParent = QFileInfo(destinationParent).exists()
+        ? QFileInfo(destinationParent).canonicalFilePath()
+        : QFileInfo(destinationParent).absoluteFilePath();
+    const QString canonicalDestination = QFileInfo(destination).exists()
+        ? QFileInfo(destination).canonicalFilePath()
+        : QDir(canonicalParent).filePath(QFileInfo(destination).fileName());
 
-    if (canonicalRoot.isEmpty() || !canonicalDestination.startsWith(canonicalRoot + QDir::separator())) {
+    if (canonicalRoot.isEmpty() || canonicalParent.isEmpty()
+        || (canonicalParent != canonicalRoot && !canonicalParent.startsWith(canonicalRoot + QDir::separator()))
+        || !canonicalDestination.startsWith(canonicalRoot + QDir::separator())) {
         if (error != nullptr) {
             *error = QStringLiteral("The restore destination is outside the selected folder.");
         }
@@ -167,5 +186,31 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
 
     QDir().mkpath(QFileInfo(destination).absolutePath());
 
-    return provider.download(entry.remotePath, destination, error);
+    if (!provider.download(entry.remotePath, destination, error)) {
+        return false;
+    }
+
+    QFile restoredFile(destination);
+    if (!restoredFile.open(QIODevice::ReadOnly)) {
+        QFile::remove(destination);
+        if (error != nullptr) {
+            *error = QStringLiteral("The restored file could not be opened for verification.");
+        }
+
+        return false;
+    }
+
+    const QByteArray checksum = QCryptographicHash::hash(restoredFile.readAll(), QCryptographicHash::Sha256);
+    if (restoredFile.size() != entry.size
+        || (!entry.checksum.isEmpty() && checksum != entry.checksum)) {
+        restoredFile.close();
+        QFile::remove(destination);
+        if (error != nullptr) {
+            *error = QStringLiteral("The restored file failed verification.");
+        }
+
+        return false;
+    }
+
+    return true;
 }

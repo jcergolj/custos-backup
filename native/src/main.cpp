@@ -1,9 +1,11 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QDir>
 
 #include "backupengine.h"
 #include "backuplauncher.h"
+#include "localprovider.h"
 #include "qprocessrunner.h"
 #include "systemdlauncher.h"
 

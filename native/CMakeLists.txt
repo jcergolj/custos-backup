@@ -13,6 +13,9 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Test)
 qt_add_executable(praefectus-native
     src/main.cpp
     src/backupengine.cpp
+    src/backupmanifest.cpp
+    src/backupconfig.cpp
+    src/systemdlauncher.cpp
     src/localprovider.cpp
     src/qprocessrunner.cpp
     src/protonprovider.cpp
@@ -20,10 +23,12 @@ qt_add_executable(praefectus-native
     src/backupworker.cpp
     src/backuplauncher.cpp
     src/backupengine.h
+    src/backupmanifest.h
 )
 
 qt_add_executable(praefectus-native-worker
     src/worker_main.cpp
+    src/backupconfig.cpp
     src/backupengine.cpp
     src/protonprovider.cpp
     src/qprocessrunner.cpp
@@ -56,6 +61,7 @@ qt_add_executable(backupengine-test
     src/backupjob.cpp
     src/backupworker.cpp
     src/backupengine.h
+    src/backupconfig.h
 )
 
 target_link_libraries(backupengine-test PRIVATE Qt6::Core Qt6::Test)

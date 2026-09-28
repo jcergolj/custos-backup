@@ -36,6 +36,13 @@ ApplicationWindow {
             Button {
                 text: qsTr("Preview")
                 onClicked: {
+                    const validationError = backupEngine.previewError(sourceField.text)
+                    if (validationError.length > 0) {
+                        fileList.model = []
+                        statusLabel.text = validationError
+                        return
+                    }
+
                     const files = backupEngine.selectableFiles(sourceField.text)
                     fileList.model = files
                     statusLabel.text = files.length === 0
@@ -84,5 +91,54 @@ ApplicationWindow {
                 width: fileList.width
             }
         }
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            TextField {
+                id: manifestField
+                placeholderText: qsTr("Path to manifest.json")
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: qsTr("Load restore")
+                onClicked: restoreController.loadManifest(manifestField.text)
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            ComboBox {
+                id: restoreEntry
+                model: restoreController.entries
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: destinationField
+                placeholderText: qsTr("Restore destination folder")
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: qsTr("Restore")
+                enabled: restoreEntry.currentIndex >= 0
+                onClicked: restoreController.restore(restoreEntry.currentIndex, destinationField.text)
+            }
+        }
+    }
+
+    Connections {
+        target: backupLauncher
+        function onStarted() { statusLabel.text = qsTr("Backup started.") }
+        function onFailed(error) { statusLabel.text = error }
+    }
+
+    Connections {
+        target: restoreController
+        function onStatusChanged(status) { statusLabel.text = status }
+        function onFailed(error) { statusLabel.text = error }
     }
 }

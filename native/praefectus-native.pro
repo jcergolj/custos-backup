@@ -6,6 +6,7 @@ TEMPLATE = app
 SOURCES += \
     src/main.cpp \
     src/backupengine.cpp \
+    src/backupmanifest.cpp \
     src/localprovider.cpp \
     src/qprocessrunner.cpp \
     src/protonprovider.cpp \
@@ -17,6 +18,7 @@ SOURCES += \
 
 HEADERS += \
     src/backupengine.h \
+    src/backupmanifest.h \
     src/backupprovider.h \
     src/localprovider.h \
     src/processrunner.h \
@@ -34,11 +36,13 @@ worker {
     TARGET = praefectus-native-worker
     SOURCES = \
         src/worker_main.cpp \
+        src/backupconfig.cpp \
         src/backupengine.cpp \
         src/protonprovider.cpp \
         src/qprocessrunner.cpp
     HEADERS = \
         src/backupengine.h \
+        src/backupconfig.h \
         src/backupprovider.h \
         src/processrunner.h \
         src/protonprovider.h \

@@ -34,6 +34,7 @@ void ServiceInstallerTest::writesUserServiceWithWorkerLimits()
     QVERIFY(service.open(QIODevice::ReadOnly));
     const QString contents = QString::fromUtf8(service.readAll());
     QVERIFY(contents.contains(QStringLiteral("ExecStart=").append(workerPath)));
+    QVERIFY(contents.contains(QStringLiteral("--config %h/.config/praefectus/native-backup.json")));
     QVERIFY(contents.contains(QStringLiteral("Nice=19")));
     QVERIFY(contents.contains(QStringLiteral("CPUQuota=10%")));
     QVERIFY(contents.contains(QStringLiteral("NoNewPrivileges=true")));

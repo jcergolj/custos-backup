@@ -10,6 +10,7 @@ class BackupEngineTest final : public QObject
 
 private slots:
     void rejectsMissingSource();
+    void rejectsUnsafeRemoteRoot();
     void listsRegularFilesAndSkipsSymlinks();
     void backsUpVerifiesAndRestoresOneFile();
 };
@@ -21,6 +22,25 @@ void BackupEngineTest::rejectsMissingSource()
 
     QVERIFY(!engine.validateSelection(QStringLiteral("/tmp/praefectus-does-not-exist"), &error));
     QCOMPARE(error, QStringLiteral("The selected folder does not exist."));
+}
+
+void BackupEngineTest::rejectsUnsafeRemoteRoot()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+
+    QFile file(source.filePath(QStringLiteral("file.txt")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("content");
+    file.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString error;
+    QVERIFY(!engine.backup(source.path(), QStringLiteral("../outside"), provider, nullptr, &error));
+    QCOMPARE(error, QStringLiteral("The remote backup folder is invalid."));
 }
 
 void BackupEngineTest::backsUpVerifiesAndRestoresOneFile()

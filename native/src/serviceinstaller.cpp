@@ -52,12 +52,12 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
         "Description=Praefectus native backup worker\n\n"
         "[Service]\n"
         "Type=oneshot\n"
-        "ExecStart=%1\n"
+        "ExecStart=%1 --config %2/.config/praefectus/native-backup.json\n"
         "Nice=19\n"
         "CPUQuota=10%\n"
         "IOSchedulingClass=idle\n"
         "NoNewPrivileges=true\n"
-    ).arg(workerPath).toUtf8();
+    ).arg(workerPath, QStringLiteral("%h")).toUtf8();
 
     if (service.write(contents) != contents.size() || !service.commit()) {
         if (error != nullptr) {
