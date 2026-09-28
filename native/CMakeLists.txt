@@ -114,6 +114,16 @@ qt_add_executable(backupconfig-test
 target_link_libraries(backupconfig-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME backupconfig-test COMMAND backupconfig-test)
 
+qt_add_executable(backupmanifest-test
+    tests/backupmanifest_test.cpp
+    src/backupmanifest.cpp
+    src/backupengine.cpp
+    src/localprovider.cpp
+)
+
+target_link_libraries(backupmanifest-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME backupmanifest-test COMMAND backupmanifest-test)
+
 qt_add_executable(praefectus-native-install
     src/install_main.cpp
     src/serviceinstaller.cpp

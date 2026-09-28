@@ -150,7 +150,21 @@ bool BackupEngine::backup(const QString &sourceDirectory, const QString &remoteR
 
 bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinationDirectory, BackupProvider &provider, QString *error) const
 {
-    const QString destination = QDir(destinationDirectory).filePath(entry.sourcePath);
+    const QString relativePath = entry.sourcePath.startsWith('/')
+        ? QFileInfo(entry.sourcePath).fileName()
+        : entry.sourcePath;
+    const QString destination = QDir(destinationDirectory).filePath(relativePath);
+    const QString canonicalRoot = QFileInfo(destinationDirectory).canonicalFilePath();
+    const QString canonicalDestination = QFileInfo(destination).absoluteFilePath();
+
+    if (canonicalRoot.isEmpty() || !canonicalDestination.startsWith(canonicalRoot + QDir::separator())) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The restore destination is outside the selected folder.");
+        }
+
+        return false;
+    }
+
     QDir().mkpath(QFileInfo(destination).absolutePath());
 
     return provider.download(entry.remotePath, destination, error);
