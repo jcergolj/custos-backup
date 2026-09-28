@@ -96,3 +96,18 @@ qt_add_executable(systemdlauncher-test
 
 target_link_libraries(systemdlauncher-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME systemdlauncher-test COMMAND systemdlauncher-test)
+
+qt_add_executable(serviceinstaller-test
+    tests/serviceinstaller_test.cpp
+    src/serviceinstaller.cpp
+)
+
+target_link_libraries(serviceinstaller-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME serviceinstaller-test COMMAND serviceinstaller-test)
+
+qt_add_executable(praefectus-native-install
+    src/install_main.cpp
+    src/serviceinstaller.cpp
+)
+
+target_link_libraries(praefectus-native-install PRIVATE Qt6::Core)

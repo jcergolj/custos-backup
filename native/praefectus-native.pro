@@ -40,3 +40,12 @@ worker {
         src/protonprovider.h \
         src/qprocessrunner.h
 }
+
+installer {
+    TARGET = praefectus-native-install
+    SOURCES = \
+        src/install_main.cpp \
+        src/serviceinstaller.cpp
+    HEADERS = \
+        src/serviceinstaller.h
+}
