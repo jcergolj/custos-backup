@@ -1,0 +1,144 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+ApplicationWindow {
+    visible: true
+    width: 760
+    height: 520
+    title: qsTr("Praefectus")
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 48, 640)
+        spacing: 16
+
+        Label {
+            text: qsTr("First backup")
+            font.pixelSize: 28
+        }
+
+        Label {
+            text: qsTr("Select a folder to preview files before connecting a Proton Drive destination.")
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            TextField {
+                id: sourceField
+                placeholderText: qsTr("Absolute source folder")
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: qsTr("Preview")
+                onClicked: {
+                    const validationError = backupEngine.previewError(sourceField.text)
+                    if (validationError.length > 0) {
+                        fileList.model = []
+                        statusLabel.text = validationError
+                        return
+                    }
+
+                    const files = backupEngine.selectableFiles(sourceField.text)
+                    fileList.model = files
+                    statusLabel.text = files.length === 0
+                        ? qsTr("No regular files found.")
+                        : qsTr("%1 files selected.").arg(files.length)
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            TextField {
+                id: remoteField
+                placeholderText: qsTr("Remote backup folder")
+                text: "/my-files/backups/first-copy"
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: qsTr("Back up")
+                enabled: fileList.count > 0
+                onClicked: {
+                    statusLabel.text = qsTr("Starting background backup...")
+                    backupLauncher.startBackup(sourceField.text, remoteField.text)
+                }
+            }
+        }
+
+        Label {
+            id: statusLabel
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+        }
+
+        ListView {
+            id: fileList
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            model: []
+            delegate: Label {
+                required property string modelData
+                text: modelData
+                elide: Text.ElideMiddle
+                width: fileList.width
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            TextField {
+                id: manifestField
+                placeholderText: qsTr("Path to manifest.json")
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: qsTr("Load restore")
+                onClicked: restoreController.loadManifest(manifestField.text)
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            ComboBox {
+                id: restoreEntry
+                model: restoreController.entries
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: destinationField
+                placeholderText: qsTr("Restore destination folder")
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: qsTr("Restore")
+                enabled: restoreEntry.currentIndex >= 0
+                onClicked: restoreController.restore(restoreEntry.currentIndex, destinationField.text)
+            }
+        }
+    }
+
+    Connections {
+        target: backupLauncher
+        function onStarted() { statusLabel.text = qsTr("Backup started.") }
+        function onFailed(error) { statusLabel.text = error }
+    }
+
+    Connections {
+        target: restoreController
+        function onStatusChanged(status) { statusLabel.text = status }
+        function onFailed(error) { statusLabel.text = error }
+    }
+}

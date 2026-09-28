@@ -1,0 +1,13 @@
+[Unit]
+Description=Praefectus native backup worker
+
+[Service]
+Type=oneshot
+ExecStart=@INSTALL_PREFIX@/bin/praefectus-native-worker
+Nice=19
+CPUQuota=10%
+IOSchedulingClass=idle
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -1,86 +1,75 @@
-# Praefectus castri posterioris
+# Praefectus Native
 
-Daily backup script for Proton Drive.
-
-What it backs up:
-- everything under `~/downloads`
-- everything under `~/work`
-- except normal files under `~/work/projects`
-- from `~/work/projects`, only `.env` and `.env.*`
-
-Built-in limits:
-- skips files larger than `100M` by default
-- skips common heavy file types like archives, media, disk images, and DB files in `~/downloads`
-- keeps backups for `7` days locally and remotely
-- uploads to `/my-files/backups/<computer-name>/<date>` in Proton Drive
-- uploads only when content changed
+Praefectus Native is a Qt desktop application and worker for backing up selected
+files to Proton Drive. It runs as the logged-in desktop user and does not
+require root access.
 
 ## Requirements
 
-- Linux
-- `proton-drive`
-- `jq`
-- `tar`
-- `find`
-- `sha256sum`
+- Linux with Qt 6 and Qt Test
+- CMake 3.21 or newer
+- A C++17 compiler
+- `proton-drive`, authenticated for the current user
+- A user systemd session for service installation
 
-Check tools:
+## Build
+
+Configure and build with CMake:
+
+```bash
+cmake -S native -B build
+cmake --build build
+```
+
+Run the native test suite:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+The application executable is `build/praefectus-native`. The worker executable
+is `build/praefectus-native-worker`.
+
+## Proton Drive
+
+Install and authenticate the Proton Drive CLI for the current user:
 
 ```bash
 command -v proton-drive
-command -v jq
-```
-
-Authenticate Proton Drive once:
-
-```bash
 proton-drive auth login
+proton-drive filesystem info /my-files
 ```
 
-## Install
+The application uses the Proton CLI for uploads, downloads, and remote file
+verification.
+
+## Configuration
+
+The native application stores its backup configuration at:
+
+```text
+~/.config/praefectus/native-backup.json
+```
+
+The configuration contains the source directory, remote backup root, Proton
+CLI path, and backup schedule. The application validates source paths and
+rejects symbolic-link backup roots.
+
+## Services
+
+Build the installer executable and install the user systemd service:
 
 ```bash
-mkdir -p "$HOME/scripts/praefectus-castri-posterioris"
-cp expedi.sh "$HOME/scripts/praefectus-castri-posterioris/expedi.sh"
-chmod +x "$HOME/scripts/praefectus-castri-posterioris/expedi.sh"
+cmake --build build --target praefectus-native-install
+build/praefectus-native-install
 ```
 
-## Use
+The installer writes user-level systemd units under
+`~/.config/systemd/user`, reloads the user manager, and enables the backup
+service.
 
-Default run:
+## Restore
 
-```bash
-"$HOME/scripts/praefectus-castri-posterioris/expedi.sh"
-```
-
-Custom Proton binary or size limit:
-
-```bash
-PROTON_BIN=/path/to/proton-drive MAX_SIZE=50M "$HOME/scripts/praefectus-castri-posterioris/expedi.sh"
-```
-
-Custom computer name or remote root:
-
-```bash
-COMPUTER_NAME=my-laptop REMOTE_ROOT=/my-files/backups/my-laptop "$HOME/scripts/praefectus-castri-posterioris/expedi.sh"
-```
-
-## Scheduler
-
-Install the systemd user timer to run daily at `02:15`:
-
-```bash
-mkdir -p "$HOME/.config/systemd/user"
-cp systemd/praefectus-castri-posterioris.service "$HOME/.config/systemd/user/"
-cp systemd/praefectus-castri-posterioris.timer "$HOME/.config/systemd/user/"
-systemctl --user daemon-reload
-systemctl --user enable --now praefectus-castri-posterioris.timer
-systemctl --user list-timers praefectus-castri-posterioris.timer
-```
-
-The timer is persistent, so a missed run is started after the next login.
-
-## Notes
-
-- Proton Drive CLI was not installed on this machine when this repo was created.
-- The script uploads to `/my-files/backups/<computer-name>/<date>` by default.
+The application can load a versioned backup manifest and restore selected files.
+Restored files are checked against the manifest size and SHA-256 checksum.
+Destination traversal and symbolic-link escapes are rejected.
