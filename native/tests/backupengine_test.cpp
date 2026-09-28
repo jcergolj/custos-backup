@@ -2,6 +2,7 @@
 #include <QTest>
 
 #include "../src/backupengine.h"
+#include "../src/localprovider.h"
 
 class BackupEngineTest final : public QObject
 {
@@ -10,6 +11,7 @@ class BackupEngineTest final : public QObject
 private slots:
     void rejectsMissingSource();
     void listsRegularFilesAndSkipsSymlinks();
+    void backsUpVerifiesAndRestoresOneFile();
 };
 
 void BackupEngineTest::rejectsMissingSource()
@@ -19,6 +21,40 @@ void BackupEngineTest::rejectsMissingSource()
 
     QVERIFY(!engine.validateSelection(QStringLiteral("/tmp/praefectus-does-not-exist"), &error));
     QCOMPARE(error, QStringLiteral("The selected folder does not exist."));
+}
+
+void BackupEngineTest::backsUpVerifiesAndRestoresOneFile()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+    QVERIFY(destination.isValid());
+
+    QFile original(source.filePath(QStringLiteral("notes with spaces.txt")));
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    original.write("important content");
+    original.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString manifestPath;
+    QString error;
+
+    QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
+    QVERIFY2(QFileInfo::exists(manifestPath), qPrintable(error));
+
+    const BackupEntry entry {
+        original.fileName(),
+        QStringLiteral("copy/notes with spaces.txt"),
+        original.size(),
+    };
+    QVERIFY(engine.restoreFile(entry, destination.path(), provider, &error));
+
+    QFile restored(QDir(destination.path()).filePath(original.fileName()));
+    QVERIFY(restored.open(QIODevice::ReadOnly));
+    QCOMPARE(restored.readAll(), QByteArray("important content"));
 }
 
 void BackupEngineTest::listsRegularFilesAndSkipsSymlinks()

@@ -5,9 +5,12 @@ TEMPLATE = app
 
 SOURCES += \
     src/main.cpp \
-    src/backupengine.cpp
+    src/backupengine.cpp \
+    src/localprovider.cpp
 
 HEADERS += \
     src/backupengine.h
+    src/backupprovider.h \
+    src/localprovider.h
 
 RESOURCES += qml.qrc

@@ -1,0 +1,16 @@
+#pragma once
+
+#include "backupprovider.h"
+
+class LocalProvider final : public BackupProvider
+{
+public:
+    explicit LocalProvider(QString rootPath);
+
+    bool upload(const QString &localPath, const QString &remotePath, QString *error = nullptr) override;
+    bool download(const QString &remotePath, const QString &localPath, QString *error = nullptr) override;
+    bool inspect(const QString &remotePath, RemoteFile *file, QString *error = nullptr) override;
+
+private:
+    QString rootPath;
+};

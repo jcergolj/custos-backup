@@ -13,6 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Test)
 qt_add_executable(praefectus-native
     src/main.cpp
     src/backupengine.cpp
+    src/localprovider.cpp
     src/backupengine.h
 )
 
@@ -35,6 +36,7 @@ enable_testing()
 qt_add_executable(backupengine-test
     tests/backupengine_test.cpp
     src/backupengine.cpp
+    src/localprovider.cpp
     src/backupengine.h
 )
 
