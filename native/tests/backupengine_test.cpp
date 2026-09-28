@@ -13,6 +13,7 @@ private slots:
     void rejectsUnsafeRemoteRoot();
     void listsRegularFilesAndSkipsSymlinks();
     void backsUpVerifiesAndRestoresOneFile();
+    void localProviderRejectsUnsafePaths();
 };
 
 void BackupEngineTest::rejectsMissingSource()
@@ -103,6 +104,21 @@ void BackupEngineTest::listsRegularFilesAndSkipsSymlinks()
     };
 
     QCOMPARE(files, expected);
+}
+
+void BackupEngineTest::localProviderRejectsUnsafePaths()
+{
+    QTemporaryDir remote;
+    QVERIFY(remote.isValid());
+    LocalProvider provider(remote.path());
+    QString error;
+
+    QVERIFY(!provider.upload(QStringLiteral("/tmp/file"), QStringLiteral("../outside"), &error));
+    QCOMPARE(error, QStringLiteral("The provider path is invalid."));
+
+    error.clear();
+    QVERIFY(!provider.inspect(QStringLiteral("/absolute/file"), nullptr, &error));
+    QCOMPARE(error, QStringLiteral("The provider path is invalid."));
 }
 
 QTEST_MAIN(BackupEngineTest)

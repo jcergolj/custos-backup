@@ -10,8 +10,25 @@ LocalProvider::LocalProvider(QString rootPath)
 {
 }
 
+static bool validRemotePath(const QString &remotePath)
+{
+    const QString normalized = QDir::cleanPath(remotePath);
+
+    return !remotePath.startsWith('/') && !normalized.isEmpty() && normalized != QStringLiteral(".")
+        && normalized != QStringLiteral("..") && !normalized.startsWith(QStringLiteral("../"))
+        && !normalized.contains(QStringLiteral("/../"));
+}
+
 bool LocalProvider::upload(const QString &localPath, const QString &remotePath, QString *error)
 {
+    if (!validRemotePath(remotePath)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The provider path is invalid.");
+        }
+
+        return false;
+    }
+
     const QString destination = QDir(rootPath).filePath(remotePath);
     QDir().mkpath(QFileInfo(destination).absolutePath());
 
@@ -28,6 +45,14 @@ bool LocalProvider::upload(const QString &localPath, const QString &remotePath, 
 
 bool LocalProvider::download(const QString &remotePath, const QString &localPath, QString *error)
 {
+    if (!validRemotePath(remotePath)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The provider path is invalid.");
+        }
+
+        return false;
+    }
+
     if (QFile::exists(localPath)) {
         QFile::remove(localPath);
     }
@@ -45,6 +70,22 @@ bool LocalProvider::download(const QString &remotePath, const QString &localPath
 
 bool LocalProvider::inspect(const QString &remotePath, RemoteFile *file, QString *error)
 {
+    if (!validRemotePath(remotePath)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The provider path is invalid.");
+        }
+
+        return false;
+    }
+
+    if (file == nullptr) {
+        if (error != nullptr) {
+            *error = QStringLiteral("A destination for remote file metadata is required.");
+        }
+
+        return false;
+    }
+
     const QFileInfo info(QDir(rootPath).filePath(remotePath));
 
     if (!info.isFile()) {
