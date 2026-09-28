@@ -59,7 +59,8 @@ ApplicationWindow {
                 text: qsTr("Back up")
                 enabled: fileList.count > 0
                 onClicked: {
-                    statusLabel.text = qsTr("Backup is not connected to the Proton worker yet.")
+                    statusLabel.text = qsTr("Starting background backup...")
+                    backupLauncher.startBackup()
                 }
             }
         }

@@ -23,3 +23,20 @@ HEADERS += \
     src/backupworker.h
 
 RESOURCES += qml.qrc
+
+TARGET = praefectus-native
+
+worker {
+    TARGET = praefectus-native-worker
+    SOURCES = \
+        src/worker_main.cpp \
+        src/backupengine.cpp \
+        src/protonprovider.cpp \
+        src/qprocessrunner.cpp
+    HEADERS = \
+        src/backupengine.h \
+        src/backupprovider.h \
+        src/processrunner.h \
+        src/protonprovider.h \
+        src/qprocessrunner.h
+}

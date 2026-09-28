@@ -21,6 +21,15 @@ qt_add_executable(praefectus-native
     src/backupengine.h
 )
 
+qt_add_executable(praefectus-native-worker
+    src/worker_main.cpp
+    src/backupengine.cpp
+    src/protonprovider.cpp
+    src/qprocessrunner.cpp
+)
+
+target_link_libraries(praefectus-native-worker PRIVATE Qt6::Core)
+
 qt_add_qml_module(praefectus-native
     URI Praefectus
     VERSION 1.0
@@ -79,3 +88,11 @@ qt_add_executable(backupworker-test
 
 target_link_libraries(backupworker-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME backupworker-test COMMAND backupworker-test)
+
+qt_add_executable(systemdlauncher-test
+    tests/systemdlauncher_test.cpp
+    src/systemdlauncher.cpp
+)
+
+target_link_libraries(systemdlauncher-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME systemdlauncher-test COMMAND systemdlauncher-test)
