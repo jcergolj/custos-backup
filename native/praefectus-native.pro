@@ -7,6 +7,7 @@ SOURCES += \
     src/main.cpp \
     src/backupengine.cpp \
     src/backupmanifest.cpp \
+    src/backuprestorecontroller.cpp \
     src/localprovider.cpp \
     src/qprocessrunner.cpp \
     src/protonprovider.cpp \
@@ -19,6 +20,7 @@ SOURCES += \
 HEADERS += \
     src/backupengine.h \
     src/backupmanifest.h \
+    src/backuprestorecontroller.h \
     src/backupprovider.h \
     src/localprovider.h \
     src/processrunner.h \

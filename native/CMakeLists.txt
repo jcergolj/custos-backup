@@ -14,6 +14,7 @@ qt_add_executable(praefectus-native
     src/main.cpp
     src/backupengine.cpp
     src/backupmanifest.cpp
+    src/backuprestorecontroller.cpp
     src/backupconfig.cpp
     src/systemdlauncher.cpp
     src/localprovider.cpp
@@ -24,6 +25,7 @@ qt_add_executable(praefectus-native
     src/backuplauncher.cpp
     src/backupengine.h
     src/backupmanifest.h
+    src/backuprestorecontroller.h
 )
 
 qt_add_executable(praefectus-native-worker
@@ -129,6 +131,24 @@ qt_add_executable(backupmanifest-test
 
 target_link_libraries(backupmanifest-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME backupmanifest-test COMMAND backupmanifest-test)
+
+qt_add_executable(backuprestorecontroller-test
+    tests/backuprestorecontroller_test.cpp
+    src/backuprestorecontroller.cpp
+    src/backupmanifest.cpp
+    src/backupengine.cpp
+    src/localprovider.cpp
+    src/qprocessrunner.cpp
+    src/protonprovider.cpp
+    src/backupjob.cpp
+    src/backupworker.cpp
+    src/backuprestorecontroller.h
+    src/backupmanifest.h
+    src/backupengine.h
+)
+
+target_link_libraries(backuprestorecontroller-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME backuprestorecontroller-test COMMAND backuprestorecontroller-test)
 
 qt_add_executable(praefectus-native-install
     src/install_main.cpp
