@@ -23,6 +23,7 @@ private slots:
     void uploadUsesJsonCliArguments();
     void inspectParsesVerifiedMetadata();
     void commandErrorsAreActionable();
+    void rejectsNullMetadataOutput();
 };
 
 void ProtonProviderTest::uploadUsesJsonCliArguments()
@@ -64,6 +65,17 @@ void ProtonProviderTest::commandErrorsAreActionable()
 
     QVERIFY(!provider.download(QStringLiteral("/remote/file"), QStringLiteral("/tmp/file"), &error));
     QCOMPARE(error, QStringLiteral("not authenticated"));
+}
+
+void ProtonProviderTest::rejectsNullMetadataOutput()
+{
+    FakeRunner runner;
+    ProtonProvider provider(runner);
+    QString error;
+
+    QVERIFY(!provider.inspect(QStringLiteral("/remote/file"), nullptr, &error));
+    QCOMPARE(error, QStringLiteral("A destination for remote file metadata is required."));
+    QVERIFY(runner.arguments.isEmpty());
 }
 
 QTEST_MAIN(ProtonProviderTest)

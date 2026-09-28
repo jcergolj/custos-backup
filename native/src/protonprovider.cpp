@@ -20,6 +20,14 @@ bool ProtonProvider::download(const QString &remotePath, const QString &localPat
 
 bool ProtonProvider::inspect(const QString &remotePath, RemoteFile *file, QString *error)
 {
+    if (file == nullptr) {
+        if (error != nullptr) {
+            *error = QStringLiteral("A destination for remote file metadata is required.");
+        }
+
+        return false;
+    }
+
     const ProcessOutput output = runner.run({QStringLiteral("filesystem"), QStringLiteral("info"), QStringLiteral("-j"), remotePath});
     if (!output.successful()) {
         if (error != nullptr) {
