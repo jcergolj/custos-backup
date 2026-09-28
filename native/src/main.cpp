@@ -3,42 +3,9 @@
 #include <QQmlContext>
 
 #include "backupengine.h"
+#include "backuplauncher.h"
 #include "qprocessrunner.h"
 #include "systemdlauncher.h"
-
-class BackupLauncher : public QObject
-{
-    Q_OBJECT
-
-public:
-    explicit BackupLauncher(QObject *parent = nullptr)
-        : QObject(parent)
-        , runner(QStringLiteral("systemctl"))
-        , launcher(runner)
-    {
-    }
-
-public slots:
-    void startBackup()
-    {
-        QString error;
-        if (!launcher.startUserService(QStringLiteral("praefectus-native.service"), &error)) {
-            emit failed(error);
-
-            return;
-        }
-
-        emit started();
-    }
-
-signals:
-    void started();
-    void failed(const QString &error);
-
-private:
-    QProcessRunner runner;
-    SystemdLauncher launcher;
-};
 
 int main(int argc, char *argv[])
 {

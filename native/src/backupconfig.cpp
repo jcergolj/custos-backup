@@ -11,6 +11,11 @@ BackupConfigStore::BackupConfigStore(QString path)
 {
 }
 
+QString BackupConfigStore::filePath() const
+{
+    return path;
+}
+
 bool BackupConfigStore::load(BackupConfig *config, QString *error) const
 {
     QFile file(path);

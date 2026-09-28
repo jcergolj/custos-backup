@@ -18,6 +18,7 @@ qt_add_executable(praefectus-native
     src/protonprovider.cpp
     src/backupjob.cpp
     src/backupworker.cpp
+    src/backuplauncher.cpp
     src/backupengine.h
 )
 

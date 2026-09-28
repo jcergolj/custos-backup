@@ -15,6 +15,7 @@ public:
 
     bool load(BackupConfig *config, QString *error = nullptr) const;
     bool save(const BackupConfig &config, QString *error = nullptr) const;
+    QString filePath() const;
 
 private:
     QString path;

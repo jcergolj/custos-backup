@@ -60,7 +60,7 @@ ApplicationWindow {
                 enabled: fileList.count > 0
                 onClicked: {
                     statusLabel.text = qsTr("Starting background backup...")
-                    backupLauncher.startBackup()
+                    backupLauncher.startBackup(sourceField.text, remoteField.text)
                 }
             }
         }
