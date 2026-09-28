@@ -92,42 +92,6 @@ ApplicationWindow {
             }
         }
 
-        RowLayout {
-            Layout.fillWidth: true
-
-            TextField {
-                id: manifestField
-                placeholderText: qsTr("Path to manifest.json")
-                Layout.fillWidth: true
-            }
-
-            Button {
-                text: qsTr("Load restore")
-                onClicked: restoreController.loadManifest(manifestField.text)
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-
-            ComboBox {
-                id: restoreEntry
-                model: restoreController.entries
-                Layout.fillWidth: true
-            }
-
-            TextField {
-                id: destinationField
-                placeholderText: qsTr("Restore destination folder")
-                Layout.fillWidth: true
-            }
-
-            Button {
-                text: qsTr("Restore")
-                enabled: restoreEntry.currentIndex >= 0
-                onClicked: restoreController.restore(restoreEntry.currentIndex, destinationField.text)
-            }
-        }
     }
 
     Connections {
@@ -136,9 +100,4 @@ ApplicationWindow {
         function onFailed(error) { statusLabel.text = error }
     }
 
-    Connections {
-        target: restoreController
-        function onStatusChanged(status) { statusLabel.text = status }
-        function onFailed(error) { statusLabel.text = error }
-    }
 }
