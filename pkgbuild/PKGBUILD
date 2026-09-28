@@ -1,7 +1,7 @@
 # Maintainer: Praefectus contributors
 
-pkgname=praefectus-native
-pkgver=0.1.0
+pkgname=praefectus-native-git
+pkgver=0.1.r29.g8196306
 pkgrel=1
 pkgdesc='Native Qt backup and selective restore client for Proton Drive'
 arch=('x86_64')
@@ -11,11 +11,16 @@ depends=('qt6-base' 'qt6-declarative')
 makedepends=('cmake' 'gcc')
 optdepends=('proton-drive: Proton Drive CLI used for backup storage')
 install='praefectus-native.install'
-source=()
-sha256sums=()
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/$pkgname"
+    printf '0.1.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
 
 build() {
-    cmake -S "$startdir/../native" -B "$srcdir/build" \
+    cmake -S "$srcdir/$pkgname/native" -B "$srcdir/build" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr
     cmake --build "$srcdir/build" --target praefectus-native praefectus-native-worker
@@ -24,12 +29,12 @@ build() {
 package() {
     install -Dm755 "$srcdir/build/praefectus-native" "$pkgdir/usr/bin/praefectus-native"
     install -Dm755 "$srcdir/build/praefectus-native-worker" "$pkgdir/usr/bin/praefectus-native-worker"
-    install -Dm644 "$startdir/praefectus-native.desktop" \
+    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.desktop" \
         "$pkgdir/usr/share/applications/praefectus-native.desktop"
-    install -Dm644 "$startdir/praefectus-native.svg" \
+    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.svg" \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/praefectus-native.svg"
-    install -Dm644 "$startdir/praefectus-native.service" \
+    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.service" \
         "$pkgdir/usr/lib/systemd/user/praefectus-native.service"
-    install -Dm644 "$startdir/praefectus-native.timer" \
+    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.timer" \
         "$pkgdir/usr/lib/systemd/user/praefectus-native.timer"
 }

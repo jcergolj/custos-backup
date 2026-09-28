@@ -26,7 +26,14 @@ the package is published in the Omarchy package repository, install it with:
 omarchy pkg add praefectus-native
 ```
 
-For the current private repository, build the included package from a checkout:
+For the AUR package:
+
+```bash
+omarchy pkg aur add praefectus-native-git
+```
+
+If the AUR package is not available yet, build the included recipe from a
+checkout:
 
 ```bash
 sudo pacman -S --needed base-devel git
@@ -34,10 +41,6 @@ git clone https://github.com/jcergolj/praefectus-castri-posterioris.git
 cd praefectus-castri-posterioris/pkgbuild
 makepkg -Csi
 ```
-
-An AUR package can be published once the source repository or a public release
-tarball is available anonymously. Until then, an AUR recipe cannot fetch this
-private repository for other users.
 
 The package installs `praefectus-native`, `praefectus-native-worker`, an
 application launcher, an icon, and user systemd units. It does not package
@@ -183,6 +186,6 @@ remain unobtrusive. Inspect logs with:
 journalctl --user -u praefectus-native.service
 ```
 
-Remove the package with `sudo pacman -Rns praefectus-native` or the package name
+Remove the package with `sudo pacman -Rns praefectus-native-git` or the package name
 provided by the Omarchy repository. User configuration and remote backups
 are deliberately left in place for recovery.
