@@ -10,6 +10,7 @@ class BackupConfigTest final : public QObject
 
 private slots:
     void savesAndLoadsConfiguration();
+    void savesAndLoadsIndependentSets();
     void rejectsMalformedConfiguration();
     void rejectsIncompleteConfiguration();
     void rejectsNullOutput();
@@ -32,6 +33,50 @@ void BackupConfigTest::savesAndLoadsConfiguration()
     QCOMPARE(actual.sourceDirectory, expected.sourceDirectory);
     QCOMPARE(actual.remoteRoot, expected.remoteRoot);
     QCOMPARE(actual.protonBinary, expected.protonBinary);
+}
+
+void BackupConfigTest::savesAndLoadsIndependentSets()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    BackupConfigStore store(directory.filePath(QStringLiteral("config/settings.json")));
+    BackupConfig expected;
+    expected.protonBinary = QStringLiteral("/usr/bin/proton-drive");
+    expected.sets = {
+        {
+            QStringLiteral("documents"),
+            QStringLiteral("Documents"),
+            QStringLiteral("backups/documents"),
+            {QStringLiteral("/home/user/Documents"), QStringLiteral("/home/user/Notes")},
+            {QStringLiteral("/home/user/Documents/cache")},
+        },
+        {
+            QStringLiteral("configs"),
+            QStringLiteral("Configs"),
+            QStringLiteral("backups/configs"),
+            {QStringLiteral("/home/user/.config")},
+            {},
+        },
+    };
+    expected.sets[0].schedule = {QStringLiteral("monthly"), 8, 45, 2, 31};
+    expected.sets[0].retention = 5;
+    expected.sets[0].onlyOnAcPower = true;
+    expected.sets[0].requiredVolumes = {{QStringLiteral("/run/media/backup"), QByteArray("device")}};
+
+    QVERIFY(store.save(expected));
+    BackupConfig actual;
+    QVERIFY(store.load(&actual));
+    QCOMPARE(actual.protonBinary, expected.protonBinary);
+    QCOMPARE(actual.sets.size(), 2);
+    QCOMPARE(actual.sets.at(0).name, QStringLiteral("Documents"));
+    QCOMPARE(actual.sets.at(0).sourceDirectories, expected.sets.at(0).sourceDirectories);
+    QCOMPARE(actual.sets.at(0).exclusions, expected.sets.at(0).exclusions);
+    QCOMPARE(actual.sets.at(0).schedule.frequency, QStringLiteral("monthly"));
+    QCOMPARE(actual.sets.at(0).schedule.hour, 8);
+    QCOMPARE(actual.sets.at(0).retention, 5);
+    QCOMPARE(actual.sets.at(0).onlyOnAcPower, true);
+    QCOMPARE(actual.sets.at(0).requiredVolumes.first().deviceId, QByteArray("device"));
+    QCOMPARE(actual.sets.at(1).remoteRoot, QStringLiteral("backups/configs"));
 }
 
 void BackupConfigTest::rejectsMalformedConfiguration()

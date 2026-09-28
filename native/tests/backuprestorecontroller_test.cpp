@@ -14,6 +14,8 @@ class BackupRestoreControllerTest final : public QObject
 private slots:
     void loadsAndRestoresSelectedEntry();
     void rejectsInvalidSelection();
+    void clearsEntriesWhenManifestFailsToLoad();
+    void rejectsEmptyDestination();
 };
 
 void BackupRestoreControllerTest::loadsAndRestoresSelectedEntry()
@@ -61,6 +63,41 @@ void BackupRestoreControllerTest::rejectsInvalidSelection()
 
     QCOMPARE(failureSpy.count(), 1);
     QCOMPARE(failureSpy.first().at(0).toString(), QStringLiteral("No backup provider is configured."));
+}
+
+void BackupRestoreControllerTest::clearsEntriesWhenManifestFailsToLoad()
+{
+    QTemporaryDir manifestDirectory;
+    QVERIFY(manifestDirectory.isValid());
+
+    QFile manifest(manifestDirectory.filePath(QStringLiteral("manifest.json")));
+    QVERIFY(manifest.open(QIODevice::WriteOnly));
+    manifest.write(R"({"version":1,"entries":[]})");
+    manifest.close();
+
+    BackupEngine engine;
+    BackupRestoreController controller(engine);
+    controller.loadManifest(manifest.fileName());
+    QVERIFY(controller.entries().isEmpty());
+
+    QSignalSpy failureSpy(&controller, &BackupRestoreController::failed);
+    controller.loadManifest(manifestDirectory.filePath(QStringLiteral("missing.json")));
+
+    QVERIFY(!failureSpy.isEmpty());
+    QVERIFY(controller.entries().isEmpty());
+}
+
+void BackupRestoreControllerTest::rejectsEmptyDestination()
+{
+    BackupEngine engine;
+    LocalProvider provider(QDir::homePath());
+    BackupRestoreController controller(engine, &provider);
+    QSignalSpy failureSpy(&controller, &BackupRestoreController::failed);
+
+    controller.restore(0, QStringLiteral("  "));
+
+    QCOMPARE(failureSpy.count(), 1);
+    QCOMPARE(failureSpy.first().at(0).toString(), QStringLiteral("A restore destination folder is required."));
 }
 
 QTEST_MAIN(BackupRestoreControllerTest)

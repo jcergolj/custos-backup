@@ -23,6 +23,7 @@ private slots:
     void startsOnlyTheRequestedUserService();
     void rejectsInvalidServiceNames();
     void returnsSystemdErrors();
+    void enablesTimerAfterReloadingManager();
 };
 
 void SystemdLauncherTest::startsOnlyTheRequestedUserService()
@@ -61,6 +62,31 @@ void SystemdLauncherTest::returnsSystemdErrors()
 
     QVERIFY(!launcher.startUserService(QStringLiteral("praefectus-native.service"), &error));
     QCOMPARE(error, QStringLiteral("unit is masked"));
+}
+
+void SystemdLauncherTest::enablesTimerAfterReloadingManager()
+{
+    class SequenceRunner final : public ProcessRunner
+    {
+    public:
+        QVector<QStringList> calls;
+        ProcessOutput run(const QStringList &arguments) override
+        {
+            calls.append(arguments);
+            return {0, {}, {}};
+        }
+    } runner;
+    SystemdLauncher launcher(runner);
+
+    QVERIFY(launcher.enableUserTimer(QStringLiteral("praefectus-native.timer")));
+    QCOMPARE(runner.calls.size(), 2);
+    const QStringList reloadArguments {QStringLiteral("--user"), QStringLiteral("daemon-reload")};
+    QCOMPARE(runner.calls.at(0), reloadArguments);
+    const QStringList enableArguments {
+        QStringLiteral("--user"), QStringLiteral("enable"), QStringLiteral("--now"),
+        QStringLiteral("praefectus-native.timer"),
+    };
+    QCOMPARE(runner.calls.at(1), enableArguments);
 }
 
 QTEST_MAIN(SystemdLauncherTest)

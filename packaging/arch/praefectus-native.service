@@ -3,7 +3,7 @@ Description=Praefectus native backup worker
 
 [Service]
 Type=oneshot
-ExecStart=@INSTALL_PREFIX@/bin/praefectus-native-worker --config %h/.config/praefectus/native-backup.json
+ExecStart=/usr/bin/praefectus-native-worker --config %h/.config/praefectus/native-backup.json
 Nice=19
 CPUQuota=10%
 IOSchedulingClass=idle

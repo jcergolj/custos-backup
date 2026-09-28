@@ -29,6 +29,7 @@ void ServiceInstallerTest::writesUserServiceWithWorkerLimits()
     QString error;
     QVERIFY(installer.install(workerPath, &servicePath, &error));
     QVERIFY2(QFileInfo::exists(servicePath), qPrintable(error));
+    QVERIFY(QFileInfo::exists(directory.filePath(QStringLiteral("systemd/praefectus-native.timer"))));
 
     QFile service(servicePath);
     QVERIFY(service.open(QIODevice::ReadOnly));
@@ -38,6 +39,12 @@ void ServiceInstallerTest::writesUserServiceWithWorkerLimits()
     QVERIFY(contents.contains(QStringLiteral("Nice=19")));
     QVERIFY(contents.contains(QStringLiteral("CPUQuota=10%")));
     QVERIFY(contents.contains(QStringLiteral("NoNewPrivileges=true")));
+
+    QFile timer(directory.filePath(QStringLiteral("systemd/praefectus-native.timer")));
+    QVERIFY(timer.open(QIODevice::ReadOnly));
+    const QString timerContents = QString::fromUtf8(timer.readAll());
+    QVERIFY(timerContents.contains(QStringLiteral("Persistent=true")));
+    QVERIFY(timerContents.contains(QStringLiteral("Unit=praefectus-native.service")));
 }
 
 void ServiceInstallerTest::rejectsNonExecutableWorker()

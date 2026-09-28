@@ -1,7 +1,9 @@
 #include <QTemporaryDir>
+#include <QCryptographicHash>
 #include <QTest>
 
 #include "../src/backupengine.h"
+#include "../src/backupmanifest.h"
 #include "../src/localprovider.h"
 
 class BackupEngineTest final : public QObject
@@ -13,6 +15,11 @@ private slots:
     void rejectsUnsafeRemoteRoot();
     void listsRegularFilesAndSkipsSymlinks();
     void backsUpVerifiesAndRestoresOneFile();
+    void backsUpStoresVerifiedChecksum();
+    void previewsMultipleSourcesAndExclusions();
+    void backsUpMultipleSourcesWithoutCollisions();
+    void preservesVerifiedItemsInAnIncompleteCopy();
+    void reusesAnExistingVerifiedCopyOnRetry();
     void localProviderRejectsUnsafePaths();
 };
 
@@ -76,6 +83,147 @@ void BackupEngineTest::backsUpVerifiesAndRestoresOneFile()
     QFile restored(QDir(destination.path()).filePath(original.fileName()));
     QVERIFY(restored.open(QIODevice::ReadOnly));
     QCOMPARE(restored.readAll(), QByteArray("important content"));
+}
+
+void BackupEngineTest::backsUpStoresVerifiedChecksum()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+
+    QFile original(source.filePath(QStringLiteral("notes.txt")));
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    original.write("important content");
+    original.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString manifestPath;
+    QString error;
+    QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
+
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifestPath, &entries, &error));
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(entries.first().checksum,
+        QCryptographicHash::hash("important content", QCryptographicHash::Sha256));
+}
+
+void BackupEngineTest::previewsMultipleSourcesAndExclusions()
+{
+    QTemporaryDir first;
+    QTemporaryDir second;
+    QVERIFY(first.isValid());
+    QVERIFY(second.isValid());
+    QVERIFY(QDir().mkpath(first.filePath(QStringLiteral("cache"))));
+
+    QFile included(first.filePath(QStringLiteral("keep.txt")));
+    QVERIFY(included.open(QIODevice::WriteOnly));
+    included.write("keep");
+    included.close();
+    QFile excluded(first.filePath(QStringLiteral("cache/drop.txt")));
+    QVERIFY(excluded.open(QIODevice::WriteOnly));
+    excluded.write("drop");
+    excluded.close();
+    QFile secondFile(second.filePath(QStringLiteral("same-name.txt")));
+    QVERIFY(secondFile.open(QIODevice::WriteOnly));
+    secondFile.write("second");
+    secondFile.close();
+
+    BackupEngine engine;
+    const BackupPreview preview = engine.preview(
+        {first.path(), second.path()},
+        {first.filePath(QStringLiteral("cache"))}
+    );
+
+    QCOMPARE(preview.includedFiles.size(), 2);
+    QCOMPARE(preview.excludedFiles, QStringList {excluded.fileName()});
+    QVERIFY(preview.includedFiles.contains(included.fileName()));
+    QVERIFY(preview.includedFiles.contains(secondFile.fileName()));
+}
+
+void BackupEngineTest::backsUpMultipleSourcesWithoutCollisions()
+{
+    QTemporaryDir first;
+    QTemporaryDir second;
+    QTemporaryDir remote;
+    QVERIFY(first.isValid());
+    QVERIFY(second.isValid());
+    QVERIFY(remote.isValid());
+
+    QFile firstFile(first.filePath(QStringLiteral("same.txt")));
+    QVERIFY(firstFile.open(QIODevice::WriteOnly));
+    firstFile.write("first");
+    firstFile.close();
+    QFile secondFile(second.filePath(QStringLiteral("same.txt")));
+    QVERIFY(secondFile.open(QIODevice::WriteOnly));
+    secondFile.write("second");
+    secondFile.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString manifestPath;
+    QString error;
+    QVERIFY(engine.backup(
+        {first.path(), second.path()}, QStringLiteral("copy"), {}, provider, &manifestPath, &error
+    ));
+
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifestPath, &entries, &error));
+    QCOMPARE(entries.size(), 2);
+    QVERIFY(entries.at(0).remotePath != entries.at(1).remotePath);
+    QVERIFY(QFileInfo::exists(remote.filePath(entries.at(0).remotePath)));
+    QVERIFY(QFileInfo::exists(remote.filePath(entries.at(1).remotePath)));
+}
+
+void BackupEngineTest::preservesVerifiedItemsInAnIncompleteCopy()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+
+    QFile file(source.filePath(QStringLiteral("available.txt")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("available");
+    file.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString manifestPath;
+    QString error;
+    QVERIFY(!engine.backup(
+        {source.path(), source.filePath(QStringLiteral("missing"))},
+        QStringLiteral("copy"), {}, provider, &manifestPath, &error
+    ));
+    QVERIFY(error.startsWith(QStringLiteral("Backup incomplete:")));
+    QVERIFY(QFileInfo::exists(manifestPath));
+
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifestPath, &entries, &error));
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(entries.first().sourcePath, file.fileName());
+}
+
+void BackupEngineTest::reusesAnExistingVerifiedCopyOnRetry()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+
+    QFile file(source.filePath(QStringLiteral("retry.txt")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("retry content");
+    file.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString manifestPath;
+    QString error;
+    QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
+    QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
 }
 
 void BackupEngineTest::listsRegularFilesAndSkipsSymlinks()

@@ -13,6 +13,8 @@ class BackupManifestTest final : public QObject
 private slots:
     void loadsVersionedEntries();
     void rejectsTraversalPaths();
+    void acceptsDotsInsideFileNames();
+    void acceptsAbsoluteRemotePaths();
     void rejectsMalformedEntries();
     void rejectsNullOutput();
     void restoresOnlyTheSelectedFile();
@@ -138,6 +140,37 @@ void BackupManifestTest::rejectsTraversalPaths()
     QString error;
     QVERIFY(!BackupManifest::load(path, &entries, &error));
     QCOMPARE(error, QStringLiteral("The backup manifest contains an unsafe path."));
+}
+
+void BackupManifestTest::acceptsDotsInsideFileNames()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("manifest.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({"version":1,"entries":[{"source":"/home/user/file.txt","remote":"copy/release..txt","size":12,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]})");
+    file.close();
+
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(path, &entries));
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(entries.first().remotePath, QStringLiteral("copy/release..txt"));
+}
+
+void BackupManifestTest::acceptsAbsoluteRemotePaths()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("manifest.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({"version":1,"entries":[{"source":"/home/user/file.txt","remote":"/my-files/backups/file.txt","size":12,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]})");
+    file.close();
+
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(path, &entries));
+    QCOMPARE(entries.first().remotePath, QStringLiteral("/my-files/backups/file.txt"));
 }
 
 void BackupManifestTest::rejectsMalformedEntries()

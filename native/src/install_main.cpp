@@ -1,4 +1,6 @@
 #include "serviceinstaller.h"
+#include "qprocessrunner.h"
+#include "systemdlauncher.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -18,6 +20,14 @@ int main(int argc, char *argv[])
     ServiceInstaller installer(serviceDirectory);
     QString error;
     if (!installer.install(workerPath, nullptr, &error)) {
+        qCritical().noquote() << error;
+
+        return 1;
+    }
+
+    QProcessRunner runner(QStringLiteral("systemctl"));
+    SystemdLauncher systemd(runner);
+    if (!systemd.enableUserTimer(QStringLiteral("praefectus-native.timer"), &error)) {
         qCritical().noquote() << error;
 
         return 1;

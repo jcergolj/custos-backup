@@ -3,8 +3,11 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSaveFile>
+
+#include <algorithm>
 
 BackupConfigStore::BackupConfigStore(QString path)
     : path(std::move(path))
@@ -46,6 +49,89 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
         return false;
     }
 
+    config->sets.clear();
+    config->protonBinary = object.value(QStringLiteral("proton_binary")).toString(QStringLiteral("proton-drive"));
+
+    if (object.contains(QStringLiteral("sets"))) {
+        const QJsonValue setsValue = object.value(QStringLiteral("sets"));
+        if (!setsValue.isArray() || config->protonBinary.isEmpty()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The native backup configuration is malformed.");
+            }
+
+            return false;
+        }
+
+        for (const QJsonValue &setValue : setsValue.toArray()) {
+            if (!setValue.isObject()) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("The native backup configuration contains an invalid set.");
+                }
+
+                return false;
+            }
+
+            const QJsonObject setObject = setValue.toObject();
+            const QJsonArray sources = setObject.value(QStringLiteral("source_directories")).toArray();
+            const QJsonArray exclusions = setObject.value(QStringLiteral("exclusions")).toArray();
+            BackupSet set {
+                setObject.value(QStringLiteral("id")).toString(),
+                setObject.value(QStringLiteral("name")).toString(),
+                setObject.value(QStringLiteral("remote_root")).toString(),
+            };
+
+            for (const QJsonValue &source : sources) {
+                set.sourceDirectories.append(source.toString());
+            }
+            for (const QJsonValue &exclusion : exclusions) {
+                set.exclusions.append(exclusion.toString());
+            }
+
+            const QJsonObject schedule = setObject.value(QStringLiteral("schedule")).toObject();
+            set.schedule.frequency = schedule.value(QStringLiteral("frequency")).toString(QStringLiteral("disabled"));
+            set.schedule.hour = schedule.value(QStringLiteral("hour")).toInt(2);
+            set.schedule.minute = schedule.value(QStringLiteral("minute")).toInt(0);
+            set.schedule.weekday = schedule.value(QStringLiteral("weekday")).toInt(1);
+            set.schedule.dayOfMonth = schedule.value(QStringLiteral("day_of_month")).toInt(1);
+            set.retention = qMax(1, setObject.value(QStringLiteral("retention")).toInt(3));
+            set.onlyOnAcPower = setObject.value(QStringLiteral("only_on_ac_power")).toBool(false);
+            for (const QJsonValue &volumeValue : setObject.value(QStringLiteral("required_volumes")).toArray()) {
+                const QJsonObject volume = volumeValue.toObject();
+                set.requiredVolumes.append({
+                    volume.value(QStringLiteral("mount_path")).toString(),
+                    QByteArray::fromHex(volume.value(QStringLiteral("device_id")).toString().toLatin1()),
+                });
+            }
+
+            if (set.id.isEmpty() || set.name.isEmpty() || set.remoteRoot.isEmpty()
+                || set.sourceDirectories.isEmpty()
+                || std::any_of(set.sourceDirectories.cbegin(), set.sourceDirectories.cend(), [](const QString &source) {
+                    return source.isEmpty();
+                })) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("The native backup configuration is incomplete.");
+                }
+
+                return false;
+            }
+
+            config->sets.append(set);
+        }
+
+        if (config->sets.isEmpty()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The native backup configuration is incomplete.");
+            }
+
+            return false;
+        }
+
+        config->sourceDirectory = config->sets.first().sourceDirectories.first();
+        config->remoteRoot = config->sets.first().remoteRoot;
+
+        return true;
+    }
+
     const QString source = object.value(QStringLiteral("source_directory")).toString();
     const QString remote = object.value(QStringLiteral("remote_root")).toString();
     if (source.isEmpty() || remote.isEmpty()) {
@@ -58,19 +144,108 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
 
     config->sourceDirectory = source;
     config->remoteRoot = remote;
-    config->protonBinary = object.value(QStringLiteral("proton_binary")).toString(QStringLiteral("proton-drive"));
+    config->sets = {
+        {
+            QStringLiteral("default"),
+            QStringLiteral("Default backup"),
+            remote,
+            {source},
+            {},
+        },
+    };
 
     return true;
 }
 
 bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
 {
-    if (config.sourceDirectory.isEmpty() || config.remoteRoot.isEmpty() || config.protonBinary.isEmpty()) {
+    if (config.protonBinary.isEmpty()) {
         if (error != nullptr) {
             *error = QStringLiteral("The native backup configuration is incomplete.");
         }
 
         return false;
+    }
+
+    QJsonObject object {
+        {QStringLiteral("proton_binary"), config.protonBinary},
+    };
+
+    if (!config.sets.isEmpty()) {
+        QJsonArray sets;
+        for (const BackupSet &set : config.sets) {
+            if (set.id.isEmpty() || set.name.isEmpty() || set.remoteRoot.isEmpty() || set.sourceDirectories.isEmpty()) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("The native backup configuration is incomplete.");
+                }
+
+                return false;
+            }
+
+            QJsonArray sources;
+            for (const QString &source : set.sourceDirectories) {
+                if (source.isEmpty()) {
+                    if (error != nullptr) {
+                        *error = QStringLiteral("The native backup configuration is incomplete.");
+                    }
+
+                    return false;
+                }
+                sources.append(source);
+            }
+
+            QJsonArray exclusions;
+            for (const QString &exclusion : set.exclusions) {
+                exclusions.append(exclusion);
+            }
+
+            QJsonArray volumes;
+            for (const RequiredVolume &volume : set.requiredVolumes) {
+                if (volume.mountPath.trimmed().isEmpty()) {
+                    if (error != nullptr) {
+                        *error = QStringLiteral("The native backup configuration is incomplete.");
+                    }
+
+                    return false;
+                }
+                volumes.append(QJsonObject {
+                    {QStringLiteral("mount_path"), volume.mountPath},
+                    {QStringLiteral("device_id"), QString::fromLatin1(volume.deviceId.toHex())},
+                });
+            }
+
+            const QJsonObject schedule {
+                {QStringLiteral("frequency"), set.schedule.frequency},
+                {QStringLiteral("hour"), set.schedule.hour},
+                {QStringLiteral("minute"), set.schedule.minute},
+                {QStringLiteral("weekday"), set.schedule.weekday},
+                {QStringLiteral("day_of_month"), set.schedule.dayOfMonth},
+            };
+
+            sets.append(QJsonObject {
+                {QStringLiteral("id"), set.id},
+                {QStringLiteral("name"), set.name},
+                {QStringLiteral("remote_root"), set.remoteRoot},
+                {QStringLiteral("source_directories"), sources},
+                {QStringLiteral("exclusions"), exclusions},
+                {QStringLiteral("schedule"), schedule},
+                {QStringLiteral("retention"), qMax(1, set.retention)},
+                {QStringLiteral("only_on_ac_power"), set.onlyOnAcPower},
+                {QStringLiteral("required_volumes"), volumes},
+            });
+        }
+        object.insert(QStringLiteral("sets"), sets);
+    } else {
+        if (config.sourceDirectory.isEmpty() || config.remoteRoot.isEmpty()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The native backup configuration is incomplete.");
+            }
+
+            return false;
+        }
+
+        object.insert(QStringLiteral("source_directory"), config.sourceDirectory);
+        object.insert(QStringLiteral("remote_root"), config.remoteRoot);
     }
 
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
@@ -90,11 +265,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
         return false;
     }
 
-    const QByteArray contents = QJsonDocument(QJsonObject {
-        {QStringLiteral("source_directory"), config.sourceDirectory},
-        {QStringLiteral("remote_root"), config.remoteRoot},
-        {QStringLiteral("proton_binary"), config.protonBinary},
-    }).toJson(QJsonDocument::Indented);
+    const QByteArray contents = QJsonDocument(object).toJson(QJsonDocument::Indented);
 
     if (file.write(contents) != contents.size() || !file.commit()) {
         if (error != nullptr) {

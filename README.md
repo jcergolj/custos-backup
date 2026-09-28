@@ -1,38 +1,38 @@
 # Praefectus Native
 
-Praefectus Native is a Qt desktop application and worker for backing up selected
-files to Proton Drive. It runs as the logged-in desktop user and does not
-require root access.
+Praefectus is a small Qt desktop application for backing up selected files and
+folders to Proton Drive. It runs as the logged-in user, uses Proton's official
+`proton-drive` CLI, and keeps the backup worker running after the window closes.
+It is not a full system image tool: boot files, filesystem snapshots, and
+consistent live-database backups are outside the scope of this version.
 
-## Requirements
+## What It Does
 
-- Linux with Qt 6 and Qt Test
-- CMake 3.21 or newer
-- A C++17 compiler
-- `proton-drive`, authenticated for the current user
-- A user systemd session for service installation
+- Creates independent named backup sets with separate sources, exclusions, schedules, and retention limits.
+- Backs up ordinary files and hidden paths such as `~/.config`.
+- Skips symbolic links and reports missing or unreadable items instead of silently treating them as backed up.
+- Writes a verified manifest for every copy, including incomplete copies and their failed items.
+- Stores copies below `remote-root/<computer>/<set>/<copy-id>/`, so every run is independently restorable.
+- Restores selected verified files or folders without downloading unrelated files.
+- Discovers copies from a fresh installation using remote manifests; old local settings are not required and old schedules are never reactivated.
+- Retains three successful copies by default and removes only positively identified Praefectus copies for the correct set.
 
-## Build
+## Install With Pacman
 
-Configure and build with CMake:
+The repository contains a local Arch package. Install the build dependencies and
+the package from a checkout:
 
 ```bash
-cmake -S native -B build
-cmake --build build
+sudo pacman -S --needed base-devel cmake qt6-base qt6-declarative
+git clone https://github.com/jcergolj/praefectus-castri-posterioris.git
+cd praefectus-castri-posterioris/packaging/arch
+makepkg -Csi
 ```
 
-Run the native test suite:
-
-```bash
-ctest --test-dir build --output-on-failure
-```
-
-The application executable is `build/praefectus-native`. The worker executable
-is `build/praefectus-native-worker`.
-
-## Proton Drive
-
-Install and authenticate the Proton Drive CLI for the current user:
+The package installs `praefectus-native`, `praefectus-native-worker`, a desktop
+entry, and user systemd units. It does not package Proton's CLI. Install
+`proton-drive` from the repository or package source used on your system, then
+check it:
 
 ```bash
 command -v proton-drive
@@ -40,36 +40,133 @@ proton-drive auth login
 proton-drive filesystem info /my-files
 ```
 
-The application uses the Proton CLI for uploads, downloads, and remote file
-verification.
+The app never asks for or stores the Proton password. Authentication belongs to
+the CLI's supported credential flow.
 
-## Configuration
+The installed CLI was checked against its command help and JSON output. Uploads
+use a parent folder plus replace conflict strategy; downloads use remove
+conflict strategy; discovery uses `filesystem list`; cleanup uses per-item
+`trash` followed by `delete`. The CLI reports remote byte sizes and an optional
+SHA-256 field is used when available. Current Proton metadata normally exposes
+size and a non-verified SHA-1 digest instead, so backups verify the remote size
+and the manifest records the local SHA-256 for restore-time verification. The
+app never uses `empty-trash`.
 
-The native application stores its backup configuration at:
+Start the application from the desktop menu or run:
+
+```bash
+praefectus-native
+```
+
+Enable scheduled work once the CLI is authenticated:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now praefectus-native.timer
+systemctl --user status praefectus-native.timer
+```
+
+The timer runs after login and catches up missed work. It does not require user
+lingering. To stop scheduled work without removing the package:
+
+```bash
+systemctl --user disable --now praefectus-native.timer
+```
+
+## Build From Source
+
+For development or non-Arch systems:
+
+```bash
+cmake -S native -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The main binaries are `build/praefectus-native` and
+`build/praefectus-native-worker`. The source installer is also available when
+the worker is built outside the package:
+
+```bash
+build/praefectus-native-install build/praefectus-native-worker
+```
+
+## First Backup
+
+1. Open Praefectus and create a backup set.
+2. Enter one source file or folder per line. Hidden folders such as `~/.config` are valid.
+3. Add exclusions if needed and press **Preview**. Review included, excluded, skipped, and missing paths.
+4. Set the remote root, for example `/my-files/backups`, then save the set.
+5. Press **Back up** for a manual run, or configure a daily, weekly, or monthly schedule.
+
+Each set has its own schedule and retention value. Monthly schedules use the
+last day of the month when the configured day does not exist. An external drive
+can be required, and a set can be limited to AC power; those sets wait instead
+of producing a misleading partial run. The queue and run state are stored at:
 
 ```text
 ~/.config/praefectus/native-backup.json
+~/.config/praefectus/native-backup-runs.json
 ```
 
-The configuration contains the source directory, remote backup root, Proton
-CLI path, and backup schedule. The application validates source paths and
-rejects symbolic-link backup roots.
+## Retention And Cleanup
 
-## Services
+Retention defaults to three verified successful copies and can be changed per
+set. A failed or incomplete run never deletes an older successful copy.
 
-Build the installer executable and install the user systemd service:
+After a verified success, Praefectus calculates old successful copies and
+eligible incomplete copies for that set. Before the first cleanup it stores the
+exact proposed remote paths and shows them in the UI. Nothing is removed until
+**Confirm proposed cleanup** is pressed. Leaving the decision pending retains
+all proposed copies. Later cleanups are automatic after confirmation.
+
+For Proton Drive, cleanup calls `filesystem trash` for each exact copy and then
+`filesystem delete` for that same item. Praefectus never calls
+`filesystem empty-trash`. If permanent deletion fails after trashing, the
+target and cleanup phase are persisted and the next attempt resumes without
+expanding the deletion scope.
+
+Cleanup state is stored at:
+
+```text
+~/.config/praefectus/native-backup-cleanup.json
+```
+
+## Restore After Reinstall
+
+1. Install Praefectus and authenticate the Proton CLI for the current user.
+2. Open the application on the fresh installation. Do not recreate a local set just to discover old copies.
+3. Enter the old remote root, such as `/my-files/backups`, and press **Discover remote backups**.
+4. Search by computer, set, copy, or status. Select the intended computer and set, then choose a verified file and destination folder.
+5. For an incomplete copy, restore only the listed verified entries. Failed, missing, or unavailable items remain visibly unavailable and are not offered as successful restores.
+
+Remote manifests include computer, set, copy, timestamp, completion status,
+expected items, failed items, file paths, sizes, and checksums. Copies from two
+computers with similarly named sets remain distinguishable by their provenance.
+Malformed or unsupported manifests and files that fail remote verification are
+reported as limitations; they are never presented as successful restores.
+
+The default restore destination is a separate folder. Restored files are
+checked against manifest size and SHA-256 data, and destination traversal or
+symbolic-link escapes are rejected. No recovered metadata is written into the
+local schedule or backup queue.
+
+## Files And Services
+
+Configuration and state live under `~/.config/praefectus`. User units are
+installed under `/usr/lib/systemd/user` by the package:
+
+```text
+praefectus-native.service
+praefectus-native.timer
+```
+
+The worker uses `Nice=19`, idle I/O scheduling, and `CPUQuota=10%` so backups
+remain unobtrusive. Inspect logs with:
 
 ```bash
-cmake --build build --target praefectus-native-install
-build/praefectus-native-install
+journalctl --user -u praefectus-native.service
 ```
 
-The installer writes user-level systemd units under
-`~/.config/systemd/user`, reloads the user manager, and enables the backup
-service.
-
-## Restore
-
-The application can load a versioned backup manifest and restore selected files.
-Restored files are checked against the manifest size and SHA-256 checksum.
-Destination traversal and symbolic-link escapes are rejected.
+Remove the package with `sudo pacman -Rns praefectus-native`. User configuration
+and remote backups are deliberately left in place for recovery.

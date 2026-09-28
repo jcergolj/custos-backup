@@ -67,6 +67,33 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
         return false;
     }
 
+    const QString timerPath = QDir(serviceDirectory).filePath(QStringLiteral("praefectus-native.timer"));
+    QSaveFile timer(timerPath);
+    if (!timer.open(QIODevice::WriteOnly)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Unable to write the native systemd timer.");
+        }
+
+        return false;
+    }
+    const QByteArray timerContents = QByteArray(
+        "[Unit]\n"
+        "Description=Run Praefectus native backup scheduler\n\n"
+        "[Timer]\n"
+        "OnCalendar=*-*-* *:*:00\n"
+        "Persistent=true\n"
+        "Unit=praefectus-native.service\n\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    );
+    if (timer.write(timerContents) != timerContents.size() || !timer.commit()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Unable to finish writing the native systemd timer.");
+        }
+
+        return false;
+    }
+
     if (installedPath != nullptr) {
         *installedPath = path;
     }

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Praefectus native backup scheduler
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=praefectus-native.service
+
+[Install]
+WantedBy=timers.target

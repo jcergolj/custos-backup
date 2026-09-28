@@ -1,12 +1,74 @@
 #include "backuplauncher.h"
 
+#include "backuprunstore.h"
+
 #include <QDir>
+
+#include <algorithm>
 
 BackupLauncher::BackupLauncher(QObject *parent)
     : QObject(parent)
     , runner(QStringLiteral("systemctl"))
     , systemd(runner)
 {
+}
+
+void BackupLauncher::startBackup()
+{
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"));
+    BackupConfig config;
+    QString error;
+    if (!BackupConfigStore(configPath).load(&config, &error)) {
+        emit failed(error);
+
+        return;
+    }
+
+    BackupRunStore runs(QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-runs.json")));
+    if (!runs.load(&error)) {
+        emit failed(error);
+
+        return;
+    }
+    const QDateTime now = QDateTime::currentDateTime();
+    for (const BackupSet &set : config.sets) {
+        runs.enqueue(set.id, QStringLiteral("manual"), now);
+    }
+    if (!runs.save(&error)) {
+        emit failed(error);
+
+        return;
+    }
+
+    startService();
+}
+
+void BackupLauncher::startBackup(const QString &setId)
+{
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"));
+    BackupConfig config;
+    QString error;
+    if (!BackupConfigStore(configPath).load(&config, &error)) {
+        emit failed(error);
+        return;
+    }
+    const auto set = std::find_if(config.sets.cbegin(), config.sets.cend(), [&setId](const BackupSet &candidate) {
+        return candidate.id == setId;
+    });
+    if (set == config.sets.cend()) {
+        emit failed(QStringLiteral("The selected backup set no longer exists."));
+        return;
+    }
+    BackupRunStore runs(QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-runs.json")));
+    if (!runs.load(&error) || !runs.enqueue(setId, QStringLiteral("manual"), QDateTime::currentDateTime())) {
+        emit failed(error.isEmpty() ? QStringLiteral("The selected backup set is already queued.") : error);
+        return;
+    }
+    if (!runs.save(&error)) {
+        emit failed(error);
+        return;
+    }
+    startService();
 }
 
 void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &remoteRoot)
@@ -24,6 +86,25 @@ void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &
         return;
     }
 
+    BackupRunStore runs(QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-runs.json")));
+    if (!runs.load(&error)) {
+        emit failed(error.isEmpty() ? QStringLiteral("Unable to queue the backup.") : error);
+
+        return;
+    }
+    runs.enqueue(QStringLiteral("default"), QStringLiteral("manual"), QDateTime::currentDateTime());
+    if (!runs.save(&error)) {
+        emit failed(error.isEmpty() ? QStringLiteral("Unable to queue the backup.") : error);
+
+        return;
+    }
+
+    startService();
+}
+
+void BackupLauncher::startService()
+{
+    QString error;
     if (!systemd.startUserService(QStringLiteral("praefectus-native.service"), &error)) {
         emit failed(error);
 

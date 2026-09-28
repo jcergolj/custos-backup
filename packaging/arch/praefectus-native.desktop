@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Praefectus
+Comment=Back up selected files to Proton Drive
+Exec=praefectus-native
+Icon=folder-cloud
+Terminal=false
+Categories=Utility;Archiving;

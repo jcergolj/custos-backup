@@ -15,6 +15,8 @@ public:
     explicit BackupLauncher(QObject *parent = nullptr);
 
 public slots:
+    void startBackup();
+    void startBackup(const QString &setId);
     void startBackup(const QString &sourceDirectory, const QString &remoteRoot);
 
 signals:
@@ -22,6 +24,8 @@ signals:
     void failed(const QString &error);
 
 private:
+    void startService();
+
     QProcessRunner runner;
     SystemdLauncher systemd;
 };

@@ -1,0 +1,49 @@
+#pragma once
+
+#include <QDateTime>
+#include <QString>
+#include <QVector>
+
+struct BackupRunRecord {
+    QString setId;
+    QString status = QStringLiteral("idle");
+    QString reason;
+    QString lastError;
+    int attempts = 0;
+    QDateTime scheduledFor;
+    QDateTime nextAttempt;
+    QDateTime lastScheduled;
+    QDateTime nextScheduled;
+    QDateTime lastSuccess;
+    QDateTime lastFailure;
+};
+
+class BackupRunStore final
+{
+public:
+    explicit BackupRunStore(QString path);
+
+    bool load(QString *error = nullptr);
+    bool save(QString *error = nullptr) const;
+    QString filePath() const;
+    QVector<BackupRunRecord> &records();
+    const QVector<BackupRunRecord> &records() const;
+
+    void ensureSet(const QString &setId);
+    bool enqueue(const QString &setId, const QString &reason, const QDateTime &scheduledFor);
+    QVector<int> readyIndexes(const QDateTime &now) const;
+    BackupRunRecord *find(const QString &setId);
+    const BackupRunRecord *find(const QString &setId) const;
+    void markRunning(BackupRunRecord &record);
+    void markSuccess(BackupRunRecord &record, const QDateTime &now);
+    void markWaiting(BackupRunRecord &record, const QString &reason, const QDateTime &now);
+    void markRetrying(BackupRunRecord &record, const QString &error, const QDateTime &now);
+    void markIncomplete(BackupRunRecord &record, const QString &error, const QDateTime &now);
+    void markAuthenticationRequired(BackupRunRecord &record, const QString &error, const QDateTime &now);
+
+    static int retryDelaySeconds(int attempt);
+
+private:
+    QString path;
+    QVector<BackupRunRecord> runRecords;
+};

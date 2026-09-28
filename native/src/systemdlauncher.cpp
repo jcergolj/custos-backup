@@ -34,3 +34,40 @@ bool SystemdLauncher::startUserService(const QString &serviceName, QString *erro
 
     return false;
 }
+
+bool SystemdLauncher::enableUserTimer(const QString &timerName, QString *error)
+{
+    if (timerName.trimmed().isEmpty() || timerName.contains(QChar('/'))) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The backup timer name is invalid.");
+        }
+
+        return false;
+    }
+
+    const ProcessOutput reload = runner.run({QStringLiteral("--user"), QStringLiteral("daemon-reload")});
+    if (!reload.successful()) {
+        if (error != nullptr) {
+            *error = reload.standardError.isEmpty()
+                ? QStringLiteral("Unable to reload the user systemd manager.")
+                : reload.standardError.trimmed();
+        }
+
+        return false;
+    }
+
+    const ProcessOutput enable = runner.run({
+        QStringLiteral("--user"), QStringLiteral("enable"), QStringLiteral("--now"), timerName,
+    });
+    if (enable.successful()) {
+        return true;
+    }
+
+    if (error != nullptr) {
+        *error = enable.standardError.isEmpty()
+            ? QStringLiteral("Unable to enable the backup timer.")
+            : enable.standardError.trimmed();
+    }
+
+    return false;
+}
