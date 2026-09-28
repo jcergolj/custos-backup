@@ -17,22 +17,35 @@ consistent live-database backups are outside the scope of this version.
 - Discovers copies from a fresh installation using remote manifests; old local settings are not required and old schedules are never reactivated.
 - Retains three successful copies by default and removes only positively identified Praefectus copies for the correct set.
 
-## Install With Pacman
+## Install On Omarchy
 
-The repository contains a local Arch package. Install the build dependencies and
-the package from a checkout:
+The intended Omarchy distribution is an Arch package, just like OmaWrite. Once
+the package is published in the Omarchy package repository, install it with:
 
 ```bash
-sudo pacman -S --needed base-devel cmake qt6-base qt6-declarative
+omarchy pkg add praefectus-native
+```
+
+For the AUR package:
+
+```bash
+omarchy pkg aur add praefectus-native-git
+```
+
+If the AUR package is not available yet, build the included AUR package from
+this checkout:
+
+```bash
+sudo pacman -S --needed base-devel git
 git clone https://github.com/jcergolj/praefectus-castri-posterioris.git
-cd praefectus-castri-posterioris/packaging/arch
+cd praefectus-castri-posterioris/pkgbuild
 makepkg -Csi
 ```
 
-The package installs `praefectus-native`, `praefectus-native-worker`, a desktop
-entry, and user systemd units. It does not package Proton's CLI. Install
-`proton-drive` from the repository or package source used on your system, then
-check it:
+The package installs `praefectus-native`, `praefectus-native-worker`, an
+application launcher, an icon, and user systemd units. It does not package
+Proton's CLI. Install `proton-drive` using the supported package or release
+source for your system, then check it:
 
 ```bash
 command -v proton-drive
@@ -58,13 +71,17 @@ Start the application from the desktop menu or run:
 praefectus-native
 ```
 
-Enable scheduled work once the CLI is authenticated:
+Create and save at least one backup set in the app, then enable scheduled work:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now praefectus-native.timer
 systemctl --user status praefectus-native.timer
 ```
+
+The package install hook prints this command after installation. The timer is
+not enabled automatically because it must not start before the Proton CLI is
+authenticated and a backup set exists.
 
 The timer runs after login and catches up missed work. It does not require user
 lingering. To stop scheduled work without removing the package:
@@ -168,5 +185,6 @@ remain unobtrusive. Inspect logs with:
 journalctl --user -u praefectus-native.service
 ```
 
-Remove the package with `sudo pacman -Rns praefectus-native`. User configuration
-and remote backups are deliberately left in place for recovery.
+Remove the package with `sudo pacman -Rns praefectus-native-git` or the package
+name provided by the Omarchy repository. User configuration and remote backups
+are deliberately left in place for recovery.
