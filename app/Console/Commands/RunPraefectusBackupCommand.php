@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Models\BackupProfile;
 use App\Models\BackupRun;
+use App\Services\BackupProfilePreview;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
@@ -27,7 +28,7 @@ class RunPraefectusBackupCommand extends Command
 
     protected $description = 'Run the configured Praefectus backup';
 
-    public function handle(): int
+    public function handle(BackupProfilePreview $preview): int
     {
         $profile = BackupProfile::first();
 
@@ -71,7 +72,7 @@ class RunPraefectusBackupCommand extends Command
             $this->components->info(__('Validating backup profile...'));
             $this->validateProfile($profile);
             $this->components->info(__('[1/4] Scanning source directories...'));
-            $selectedFiles = $this->selectedFiles($profile);
+            $selectedFiles = $preview->includedFiles($profile);
             $this->components->info(__('Selected :count files for backup.', ['count' => count($selectedFiles)]));
             $workingDirectory = rtrim((string) config('praefectus.local_backup_path'), '/');
             $timestamp = now()->format('Ymd-His');

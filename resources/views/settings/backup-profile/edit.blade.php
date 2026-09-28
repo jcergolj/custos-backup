@@ -80,6 +80,24 @@
             @endif
         </x-page-card>
 
+        <x-page-card class="my-6 space-y-4">
+            <x-text.heading size="lg">{{ __('Contents preview') }}</x-text.heading>
+            <x-text>{{ __('This preview uses the saved profile and shows what the next backup can see.') }}</x-text>
+
+            @foreach (['included' => 'Included files', 'excluded' => 'Excluded paths', 'skipped' => 'Skipped links or unsupported entries', 'missing' => 'Missing sources'] as $key => $label)
+                <div>
+                    <x-text class="font-medium">{{ __($label) }} ({{ count($preview[$key]) }})</x-text>
+                    @if ($preview[$key] !== [])
+                        <ul class="mt-2 space-y-1 text-sm">
+                            @foreach ($preview[$key] as $path)
+                                <li class="break-all">{{ $path }}</li>
+                            @endforeach
+                        </ul>
+                    @endif
+                </div>
+            @endforeach
+        </x-page-card>
+
         <x-page-card class="my-6">
             <form
                 id="update-backup-profile-form"
