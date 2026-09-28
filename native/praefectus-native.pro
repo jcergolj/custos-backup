@@ -6,11 +6,16 @@ TEMPLATE = app
 SOURCES += \
     src/main.cpp \
     src/backupengine.cpp \
-    src/localprovider.cpp
+    src/localprovider.cpp \
+    src/qprocessrunner.cpp \
+    src/protonprovider.cpp
 
 HEADERS += \
-    src/backupengine.h
+    src/backupengine.h \
     src/backupprovider.h \
-    src/localprovider.h
+    src/localprovider.h \
+    src/processrunner.h \
+    src/qprocessrunner.h \
+    src/protonprovider.h
 
 RESOURCES += qml.qrc
