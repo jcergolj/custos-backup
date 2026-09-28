@@ -12,6 +12,7 @@ private slots:
     void savesAndLoadsConfiguration();
     void rejectsMalformedConfiguration();
     void rejectsIncompleteConfiguration();
+    void rejectsNullOutput();
 };
 
 void BackupConfigTest::savesAndLoadsConfiguration()
@@ -60,6 +61,17 @@ void BackupConfigTest::rejectsIncompleteConfiguration()
 
     QVERIFY(!store.save(config, &error));
     QCOMPARE(error, QStringLiteral("The native backup configuration is incomplete."));
+}
+
+void BackupConfigTest::rejectsNullOutput()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    BackupConfigStore store(directory.filePath(QStringLiteral("settings.json")));
+    QString error;
+
+    QVERIFY(!store.load(nullptr, &error));
+    QCOMPARE(error, QStringLiteral("A destination for native backup configuration is required."));
 }
 
 QTEST_MAIN(BackupConfigTest)

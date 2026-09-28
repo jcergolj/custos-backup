@@ -18,6 +18,14 @@ QString BackupConfigStore::filePath() const
 
 bool BackupConfigStore::load(BackupConfig *config, QString *error) const
 {
+    if (config == nullptr) {
+        if (error != nullptr) {
+            *error = QStringLiteral("A destination for native backup configuration is required.");
+        }
+
+        return false;
+    }
+
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         if (error != nullptr) {
