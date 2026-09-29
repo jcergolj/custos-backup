@@ -158,16 +158,10 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
             config->sets.append(set);
         }
 
-        if (config->sets.isEmpty()) {
-            if (error != nullptr) {
-                *error = QStringLiteral("The Custos backup configuration is incomplete.");
-            }
-
-            return false;
+        if (!config->sets.isEmpty()) {
+            config->sourceDirectory = config->sets.first().sourceDirectories.first();
+            config->remoteRoot = config->sets.first().remoteRoot;
         }
-
-        config->sourceDirectory = config->sets.first().sourceDirectories.first();
-        config->remoteRoot = config->sets.first().remoteRoot;
 
         return true;
     }
@@ -278,17 +272,11 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
             });
         }
         object.insert(QStringLiteral("sets"), sets);
-    } else {
-        if (config.sourceDirectory.isEmpty() || config.remoteRoot.isEmpty()) {
-            if (error != nullptr) {
-                *error = QStringLiteral("The Custos backup configuration is incomplete.");
-            }
-
-            return false;
-        }
-
+    } else if (!config.sourceDirectory.isEmpty() && !config.remoteRoot.isEmpty()) {
         object.insert(QStringLiteral("source_directory"), config.sourceDirectory);
         object.insert(QStringLiteral("remote_root"), config.remoteRoot);
+    } else {
+        object.insert(QStringLiteral("sets"), QJsonArray());
     }
 
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {

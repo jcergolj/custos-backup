@@ -11,6 +11,7 @@ class BackupConfigTest final : public QObject
 private slots:
     void savesAndLoadsConfiguration();
     void savesAndLoadsIndependentSets();
+    void savesAndLoadsEmptySetList();
     void rejectsMalformedConfiguration();
     void rejectsIncompleteConfiguration();
     void rejectsDuplicateSetIdsAndInvalidSchedules();
@@ -80,6 +81,21 @@ void BackupConfigTest::savesAndLoadsIndependentSets()
     QCOMPARE(actual.sets.at(1).remoteRoot, QStringLiteral("backups/configs"));
 }
 
+void BackupConfigTest::savesAndLoadsEmptySetList()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    BackupConfigStore store(directory.filePath(QStringLiteral("config/settings.json")));
+    BackupConfig expected;
+    expected.protonBinary = QStringLiteral("/usr/bin/proton-drive");
+
+    QVERIFY(store.save(expected));
+    BackupConfig actual;
+    QVERIFY(store.load(&actual));
+    QCOMPARE(actual.protonBinary, expected.protonBinary);
+    QVERIFY(actual.sets.isEmpty());
+}
+
 void BackupConfigTest::rejectsMalformedConfiguration()
 {
     QTemporaryDir directory;
@@ -103,6 +119,7 @@ void BackupConfigTest::rejectsIncompleteConfiguration()
     QVERIFY(directory.isValid());
     BackupConfigStore store(directory.filePath(QStringLiteral("settings.json")));
     BackupConfig config;
+    config.protonBinary.clear();
     QString error;
 
     QVERIFY(!store.save(config, &error));

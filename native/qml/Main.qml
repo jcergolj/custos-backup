@@ -220,14 +220,7 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
 
-                        Label {
-                            text: qsTr("Dashboard")
-                            font.family: root.displayFontFamily
-                            font.pixelSize: root.pageTitleSize
-                            font.weight: Font.Bold
-                            color: root.accentColor
-                            Layout.fillWidth: true
-                        }
+                        Item { Layout.fillWidth: true }
 
                         Button {
                             text: qsTr("New backup set")
@@ -244,66 +237,81 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(84, Math.min(260, dashboardSetsList.contentHeight + 56))
 
-                        ListView {
-                            id: dashboardSetsList
+                        ColumnLayout {
                             anchors.fill: parent
-                            model: backupSetController.setNames
-                            clip: true
 
-                            delegate: Frame {
-                                required property int index
-                                required property string modelData
-                                width: dashboardSetsList.width
-                                implicitHeight: 64
+                            Label {
+                                text: qsTr("No backup sets yet. Create one to get started.")
+                                visible: backupSetController.setNames.length === 0
+                                font.pixelSize: root.bodyTypeSize
+                                lineHeight: root.bodyLeading
+                                lineHeightMode: Text.ProportionalHeight
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
 
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: root.cardPadding
+                            ListView {
+                                id: dashboardSetsList
+                                model: backupSetController.setNames
+                                clip: true
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
 
-                                    Label {
-                                        text: modelData
-                                        font.family: root.bodyFontFamily
-                                        font.pixelSize: root.bodyTypeSize
-                                        font.weight: Font.Bold
-                                        color: root.accentColor
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                        Layout.minimumWidth: 60
-                                    }
+                                delegate: Frame {
+                                    required property int index
+                                    required property string modelData
+                                    width: dashboardSetsList.width
+                                    implicitHeight: 64
 
-                                    Button {
-                                        text: qsTr("Edit")
-                                        font.pixelSize: root.metadataTypeSize
-                                        Layout.preferredWidth: 52
-                                        onClicked: {
-                                            backupSetController.currentIndex = index
-                                            loadCurrentSet()
-                                            root.showEditor = true
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: root.cardPadding
+
+                                        Label {
+                                            text: modelData
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: root.bodyTypeSize
+                                            font.weight: Font.Bold
+                                            color: root.accentColor
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 60
                                         }
-                                    }
 
-                                    BusyIndicator {
-                                        running: backupSetController.runningSetIds.indexOf(backupSetController.setIds[index]) >= 0
-                                        visible: running
-                                        Layout.preferredWidth: 24
-                                        Layout.preferredHeight: 24
-                                    }
+                                        Button {
+                                            text: qsTr("Edit")
+                                            font.pixelSize: root.metadataTypeSize
+                                            Layout.preferredWidth: 52
+                                            onClicked: {
+                                                backupSetController.currentIndex = index
+                                                loadCurrentSet()
+                                                root.showEditor = true
+                                            }
+                                        }
 
-                                    Button {
-                                        text: qsTr("Back up")
-                                        font.pixelSize: root.metadataTypeSize
-                                        Layout.preferredWidth: 70
-                                        enabled: index < backupSetController.setIds.length
-                                        onClicked: backupLauncher.startBackup(backupSetController.setIds[index])
-                                    }
+                                        BusyIndicator {
+                                            running: backupSetController.runningSetIds.indexOf(backupSetController.setIds[index]) >= 0
+                                            visible: running
+                                            Layout.preferredWidth: 24
+                                            Layout.preferredHeight: 24
+                                        }
 
-                                    Button {
-                                        text: qsTr("Remove set")
-                                        font.pixelSize: root.metadataTypeSize
-                                        Layout.preferredWidth: 88
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: qsTr("Remove this backup set")
-                                        onClicked: root.requestRemoveSet(index)
+                                        Button {
+                                            text: qsTr("Back up")
+                                            font.pixelSize: root.metadataTypeSize
+                                            Layout.preferredWidth: 70
+                                            enabled: index < backupSetController.setIds.length
+                                            onClicked: backupLauncher.startBackup(backupSetController.setIds[index])
+                                        }
+
+                                        Button {
+                                            text: qsTr("Remove set")
+                                            font.pixelSize: root.metadataTypeSize
+                                            Layout.preferredWidth: 88
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: qsTr("Remove this backup set")
+                                            onClicked: root.requestRemoveSet(index)
+                                        }
                                     }
                                 }
                             }
@@ -539,14 +547,7 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
 
-                        Label {
-                            text: qsTr("Backup set")
-                            font.family: root.displayFontFamily
-                            font.pixelSize: root.pageTitleSize
-                            font.weight: Font.Bold
-                            color: root.accentColor
-                            Layout.fillWidth: true
-                        }
+                        Item { Layout.fillWidth: true }
 
                         Button {
                             text: qsTr("Close")

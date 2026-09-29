@@ -425,10 +425,15 @@ void BackupSetController::removeSet(int index)
         return;
     }
 
-    config.sets.removeAt(index);
-    if (config.sets.isEmpty()) {
-        config.sets.append(newSet(1));
+    BackupConfig updated = config;
+    updated.sets.removeAt(index);
+    QString error;
+    if (!store.save(updated, &error)) {
+        emit failed(error);
+        return;
     }
+
+    config = updated;
     if (selectedIndex > index) {
         --selectedIndex;
     } else if (selectedIndex == index) {
