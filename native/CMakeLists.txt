@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(praefectus_native VERSION 0.1 LANGUAGES CXX)
+project(custos VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +10,7 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Test)
 
-qt_add_executable(praefectus-native
+qt_add_executable(custos
     src/main.cpp
     src/backupengine.cpp
     src/backupmanifest.cpp
@@ -37,7 +37,7 @@ qt_add_executable(praefectus-native
     src/backupsetcontroller.h
 )
 
-qt_add_executable(praefectus-native-worker
+qt_add_executable(custos-worker
     src/worker_main.cpp
     src/backupconfig.cpp
     src/backupengine.cpp
@@ -51,16 +51,16 @@ qt_add_executable(praefectus-native-worker
     src/backupecleanup.cpp
 )
 
-target_link_libraries(praefectus-native-worker PRIVATE Qt6::Core)
+target_link_libraries(custos-worker PRIVATE Qt6::Core)
 
-qt_add_qml_module(praefectus-native
-    URI Praefectus
+qt_add_qml_module(custos
+    URI Custos
     VERSION 1.0
     QML_FILES
         qml/Main.qml
 )
 
-target_link_libraries(praefectus-native PRIVATE
+target_link_libraries(custos PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Quick
@@ -190,11 +190,11 @@ qt_add_executable(retention-discovery-test
 target_link_libraries(retention-discovery-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME retention-discovery-test COMMAND retention-discovery-test)
 
-qt_add_executable(praefectus-native-install
+qt_add_executable(custos-install
     src/install_main.cpp
     src/serviceinstaller.cpp
     src/systemdlauncher.cpp
     src/qprocessrunner.cpp
 )
 
-target_link_libraries(praefectus-native-install PRIVATE Qt6::Core)
+target_link_libraries(custos-install PRIVATE Qt6::Core)

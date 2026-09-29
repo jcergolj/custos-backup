@@ -1,0 +1,10 @@
+[Unit]
+Description=Custos Backup worker
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/custos-worker --config %h/.config/custos/custos-backup.json
+Nice=19
+CPUQuota=10%
+IOSchedulingClass=idle
+NoNewPrivileges=true

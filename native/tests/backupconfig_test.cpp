@@ -13,6 +13,7 @@ private slots:
     void savesAndLoadsIndependentSets();
     void rejectsMalformedConfiguration();
     void rejectsIncompleteConfiguration();
+    void rejectsDuplicateSetIdsAndInvalidSchedules();
     void rejectsNullOutput();
 };
 
@@ -93,7 +94,7 @@ void BackupConfigTest::rejectsMalformedConfiguration()
     BackupConfig config;
     QString error;
     QVERIFY(!store.load(&config, &error));
-    QCOMPARE(error, QStringLiteral("The native backup configuration is malformed."));
+    QCOMPARE(error, QStringLiteral("The Custos backup configuration is malformed."));
 }
 
 void BackupConfigTest::rejectsIncompleteConfiguration()
@@ -105,7 +106,28 @@ void BackupConfigTest::rejectsIncompleteConfiguration()
     QString error;
 
     QVERIFY(!store.save(config, &error));
-    QCOMPARE(error, QStringLiteral("The native backup configuration is incomplete."));
+    QCOMPARE(error, QStringLiteral("The Custos backup configuration is incomplete."));
+}
+
+void BackupConfigTest::rejectsDuplicateSetIdsAndInvalidSchedules()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    BackupConfigStore store(directory.filePath(QStringLiteral("settings.json")));
+    BackupConfig config;
+    config.protonBinary = QStringLiteral("proton-drive");
+    config.sets = {
+        {QStringLiteral("same"), QStringLiteral("One"), QStringLiteral("backups/one"), {QStringLiteral("/tmp")}},
+        {QStringLiteral("same"), QStringLiteral("Two"), QStringLiteral("backups/two"), {QStringLiteral("/tmp")}},
+    };
+    QString error;
+    QVERIFY(!store.save(config, &error));
+    QCOMPARE(error, QStringLiteral("The Custos backup configuration is incomplete."));
+
+    config.sets.removeLast();
+    config.sets.first().schedule.frequency = QStringLiteral("hourly");
+    QVERIFY(!store.save(config, &error));
+    QCOMPARE(error, QStringLiteral("The Custos backup configuration is incomplete."));
 }
 
 void BackupConfigTest::rejectsNullOutput()
@@ -116,7 +138,7 @@ void BackupConfigTest::rejectsNullOutput()
     QString error;
 
     QVERIFY(!store.load(nullptr, &error));
-    QCOMPARE(error, QStringLiteral("A destination for native backup configuration is required."));
+    QCOMPARE(error, QStringLiteral("A destination for Custos backup configuration is required."));
 }
 
 QTEST_MAIN(BackupConfigTest)

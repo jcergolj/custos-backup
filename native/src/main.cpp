@@ -13,19 +13,21 @@
 int main(int argc, char *argv[])
 {
     QGuiApplication application(argc, argv);
+    application.setApplicationName(QStringLiteral("Custos Backup"));
+    application.setApplicationDisplayName(QStringLiteral("Custos Backup"));
     QQmlApplicationEngine engine;
     BackupEngine backupEngine;
     BackupLauncher backupLauncher;
     BackupSetController backupSetController(
         backupEngine,
-        QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"))
+        QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"))
     );
     BackupConfig config;
     QString configError;
-    const QString configPath = QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"));
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"));
     const QString protonBinary = BackupConfigStore(configPath).load(&config, &configError)
         ? config.protonBinary
-        : qEnvironmentVariable("PRAEFECTUS_PROTON_BIN", QStringLiteral("proton-drive"));
+        : qEnvironmentVariable("CUSTOS_PROTON_BIN", QStringLiteral("proton-drive"));
     QProcessRunner restoreRunner(
         protonBinary
     );
@@ -36,7 +38,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("backupLauncher"), &backupLauncher);
     engine.rootContext()->setContextProperty(QStringLiteral("backupSetController"), &backupSetController);
     engine.rootContext()->setContextProperty(QStringLiteral("restoreController"), &restoreController);
-    engine.loadFromModule(QStringLiteral("Praefectus"), QStringLiteral("Main"));
+    engine.loadFromModule(QStringLiteral("Custos"), QStringLiteral("Main"));
 
     if (engine.rootObjects().isEmpty()) {
         return 1;

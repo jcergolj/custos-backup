@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 
 #include <algorithm>
 
@@ -24,6 +25,18 @@ bool stringArray(const QJsonValue &value)
         }
     }
     return true;
+}
+
+bool validChecksum(const QString &value)
+{
+    if (value.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256) * 2) {
+        return false;
+    }
+    return std::all_of(value.cbegin(), value.cend(), [](const QChar character) {
+        const QChar lower = character.toLower();
+        return (character >= QChar('0') && character <= QChar('9'))
+            || (lower >= QChar('a') && lower <= QChar('f'));
+    });
 }
 
 }
@@ -66,7 +79,7 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         return false;
     }
 
-    if (version == 2 && (root.value(QStringLiteral("application")).toString() != QStringLiteral("praefectus")
+    if (version == 2 && (root.value(QStringLiteral("application")).toString() != QStringLiteral("custos")
             || root.value(QStringLiteral("computer")).toString().isEmpty()
             || root.value(QStringLiteral("set_id")).toString().isEmpty()
             || root.value(QStringLiteral("copy_id")).toString().isEmpty()
@@ -89,6 +102,28 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         return false;
     }
     const QJsonArray manifestEntries = entriesValue.toArray();
+    QStringList expectedItems;
+    QStringList failedItems;
+    QSet<QString> expectedSet;
+    if (version == 2) {
+        for (const QJsonValue &item : root.value(QStringLiteral("expected")).toArray()) {
+            expectedItems.append(item.toString());
+        }
+        for (const QJsonValue &item : root.value(QStringLiteral("failed")).toArray()) {
+            failedItems.append(item.toString());
+        }
+        expectedSet = QSet<QString>(expectedItems.cbegin(), expectedItems.cend());
+        const QSet<QString> failedSet(failedItems.cbegin(), failedItems.cend());
+        if (expectedSet.size() != expectedItems.size() || failedSet.size() != failedItems.size()
+            || std::any_of(failedItems.cbegin(), failedItems.cend(), [&expectedSet](const QString &item) {
+                return expectedSet.contains(item);
+            })) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The backup manifest is malformed or unsupported.");
+            }
+            return false;
+        }
+    }
     if (info != nullptr) {
         info->version = version;
         info->application = root.value(QStringLiteral("application")).toString();
@@ -98,18 +133,8 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         info->copyId = root.value(QStringLiteral("copy_id")).toString();
         info->createdAt = QDateTime::fromString(root.value(QStringLiteral("created_at")).toString(), Qt::ISODateWithMs);
         info->status = root.value(QStringLiteral("status")).toString(version == 1 ? QStringLiteral("complete") : QString());
-        info->expectedItems.clear();
-        for (const QJsonValue &item : root.value(QStringLiteral("expected")).toArray()) {
-            if (item.isString()) {
-                info->expectedItems.append(item.toString());
-            }
-        }
-        info->failedItems.clear();
-        for (const QJsonValue &item : root.value(QStringLiteral("failed")).toArray()) {
-            if (item.isString()) {
-                info->failedItems.append(item.toString());
-            }
-        }
+        info->expectedItems = expectedItems;
+        info->failedItems = failedItems;
     }
     for (const QJsonValue &value : manifestEntries) {
         if (!value.isObject()) {
@@ -125,7 +150,8 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         const QString remote = object.value(QStringLiteral("remote")).toString();
         const QString restore = object.value(QStringLiteral("restore")).toString();
         const QJsonValue sizeValue = object.value(QStringLiteral("size"));
-        const QByteArray checksum = QByteArray::fromHex(object.value(QStringLiteral("sha256")).toString().toLatin1());
+        const QString checksumText = object.value(QStringLiteral("sha256")).toString();
+        const QByteArray checksum = QByteArray::fromHex(checksumText.toLatin1());
         const QStringList remoteParts = remote.split('/', Qt::KeepEmptyParts);
         const bool containsParentSegment = std::any_of(
             remoteParts.cbegin(), remoteParts.cend(), [](const QString &part) {
@@ -140,7 +166,8 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         if (source.isEmpty() || remote.isEmpty() || unsafeRestorePath
             || containsParentSegment || !sizeValue.isDouble()
             || sizeValue.toDouble() < 0 || sizeValue.toDouble() != qFloor(sizeValue.toDouble())
-            || checksum.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256)) {
+            || !validChecksum(checksumText)
+            || (version == 2 && !expectedSet.contains(restorePath))) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup manifest contains an unsafe path.");
             }
@@ -149,6 +176,26 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         }
 
         entries->append({source, remote, static_cast<qint64>(sizeValue.toDouble()), checksum, restorePath});
+    }
+
+    if (version == 2) {
+        QSet<QString> entryPaths;
+        for (const BackupEntry &entry : *entries) {
+            if (entryPaths.contains(entry.restorePath)) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("The backup manifest is malformed or unsupported.");
+                }
+                return false;
+            }
+            entryPaths.insert(entry.restorePath);
+        }
+        if (root.value(QStringLiteral("status")).toString() == QStringLiteral("complete")
+            && (!failedItems.isEmpty() || entryPaths != expectedSet)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The backup manifest is malformed or unsupported.");
+            }
+            return false;
+        }
     }
 
     return true;

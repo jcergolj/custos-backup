@@ -25,8 +25,8 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
     : QObject(parent)
     , engine(engine)
     , store(configPath)
-    , runStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("native-backup-runs.json")))
-    , cleanupStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("native-backup-cleanup.json")))
+    , runStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("custos-backup-runs.json")))
+    , cleanupStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("custos-backup-cleanup.json")))
 {
     connect(&stateTimer, &QTimer::timeout, this, &BackupSetController::refreshRunState);
     stateTimer.start(5000);
@@ -38,7 +38,7 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
     } else if (QFileInfo::exists(store.filePath())) {
         emit failed(error);
     } else {
-        config.protonBinary = qEnvironmentVariable("PRAEFECTUS_PROTON_BIN", QStringLiteral("proton-drive"));
+        config.protonBinary = qEnvironmentVariable("CUSTOS_PROTON_BIN", QStringLiteral("proton-drive"));
         config.sets.append(newSet(1));
         selectedIndex = 0;
     }

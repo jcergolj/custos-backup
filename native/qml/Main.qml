@@ -7,7 +7,7 @@ ApplicationWindow {
     visible: true
     width: 860
     height: 760
-    title: qsTr("Praefectus")
+    title: qsTr("Custos Backup")
     property var selectedRestoreIndexes: []
 
     function lines(value) {
@@ -442,6 +442,8 @@ ApplicationWindow {
 
     Connections {
         target: restoreController
+        function onEntriesChanged() { root.selectedRestoreIndexes = [] }
+        function onCopiesChanged() { remoteCopySelector.currentIndex = -1 }
         function onStatusChanged(status) { statusLabel.text = status }
         function onFailed(error) { statusLabel.text = error }
     }

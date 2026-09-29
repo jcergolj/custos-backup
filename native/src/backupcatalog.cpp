@@ -4,6 +4,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QSet>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -32,8 +33,14 @@ void warning(QString *error, const QString &message)
 }
 
 bool visit(BackupProvider &provider, const QString &path, const QString &rootPath,
-    QVector<RemoteCopy> *copies, QString *error)
+    QVector<RemoteCopy> *copies, QSet<QString> *visited, QString *error)
 {
+    const QString cleanPath = QDir::cleanPath(path);
+    if (visited->contains(cleanPath)) {
+        return true;
+    }
+    visited->insert(cleanPath);
+
     QVector<RemoteItem> items;
     if (!inspectFolder(provider, path, &items, error)) {
         return false;
@@ -45,7 +52,7 @@ bool visit(BackupProvider &provider, const QString &path, const QString &rootPat
             continue;
         }
         if (item.directory) {
-            if (!visit(provider, item.path, rootPath, copies, error)) {
+            if (!visit(provider, item.path, rootPath, copies, visited, error)) {
                 return false;
             }
             continue;
@@ -75,11 +82,11 @@ bool visit(BackupProvider &provider, const QString &path, const QString &rootPat
             warning(error, QStringLiteral("The remote manifest %1 is unavailable: %2").arg(item.path, manifestError));
             continue;
         }
-        if (info.version != 2 || info.application != QStringLiteral("praefectus")
+        if (info.version != 2 || info.application != QStringLiteral("custos")
             || info.computerName.isEmpty() || info.setId.isEmpty() || info.copyId.isEmpty()
             || !info.createdAt.isValid()
             || (info.status != QStringLiteral("complete") && info.status != QStringLiteral("incomplete"))) {
-            warning(error, QStringLiteral("The remote manifest %1 is not a supported Praefectus copy.").arg(item.path));
+            warning(error, QStringLiteral("The remote manifest %1 is not a supported Custos Backup copy.").arg(item.path));
             continue;
         }
 
@@ -135,7 +142,8 @@ bool BackupCatalog::discover(BackupProvider &provider, const QString &remoteRoot
     }
 
     const QString normalizedRoot = QDir::cleanPath(remoteRoot);
-    if (!visit(provider, normalizedRoot, normalizedRoot, copies, error)) {
+    QSet<QString> visited;
+    if (!visit(provider, normalizedRoot, normalizedRoot, copies, &visited, error)) {
         copies->clear();
         return false;
     }

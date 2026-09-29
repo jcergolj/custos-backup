@@ -5,12 +5,12 @@ and advanced users but are not needed for the quick start.
 
 ## Local State
 
-Praefectus stores user state under `~/.config/praefectus`:
+Custos stores user state under `~/.config/custos`:
 
 ```text
-native-backup.json
-native-backup-runs.json
-native-backup-cleanup.json
+custos-backup.json
+custos-backup-runs.json
+custos-backup-cleanup.json
 ```
 
 The first file contains configured backup sets. Run history and pending cleanup
@@ -39,13 +39,13 @@ The Proton Drive provider uses the official CLI for:
 - discovery through `filesystem list`;
 - cleanup through per-item `trash` followed by `delete`.
 
-Praefectus never calls `empty-trash`. Remote size is verified after upload and
+Custos never calls `empty-trash`. Remote size is verified after upload and
 download. The manifest records the local SHA-256 checksum; a provider SHA-256
 field is used when the CLI exposes one.
 
 ## Retention And Cleanup
 
-Retention considers only positively identified Praefectus copies for the
+Retention considers only positively identified Custos copies for the
 correct computer and set. Successful verified copies are retained according to
 the set limit. Failed or incomplete copies cannot cause an older successful
 copy to be removed.
@@ -66,15 +66,13 @@ separate folder, and restore metadata is not added to the local backup queue.
 The package installs these user units:
 
 ```text
-/usr/lib/systemd/user/praefectus-native.service
-/usr/lib/systemd/user/praefectus-native.timer
+/usr/lib/systemd/user/custos.service
+/usr/lib/systemd/user/custos.timer
 ```
 
 The worker runs at low priority with idle I/O scheduling and a 10% CPU quota.
 The timer is intentionally not enabled by the package install hook because the
 CLI must be authenticated and a backup set must exist first.
 
-The display name is **Praefectus Backup**. The technical package, executable,
-unit, and configuration names remain `praefectus-native-git`,
-`praefectus-native`, and `praefectus-native.*` for package and data
-compatibility.
+The display name is **Custos Backup**. The technical package, executable, unit,
+and configuration names are `custos-git`, `custos`, and `custos.*`.

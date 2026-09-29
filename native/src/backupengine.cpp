@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUuid>
@@ -26,7 +27,9 @@ bool isWithinPath(const QString &path, const QString &root)
     const QString cleanPath = QDir::cleanPath(path);
     const QString cleanRoot = QDir::cleanPath(root);
 
-    return cleanPath == cleanRoot || cleanPath.startsWith(cleanRoot + QDir::separator());
+    return cleanPath == cleanRoot || (cleanRoot == QStringLiteral("/")
+        ? cleanPath.startsWith('/')
+        : cleanPath.startsWith(cleanRoot + QDir::separator()));
 }
 
 bool isExcluded(const QString &path, const QStringList &exclusions)
@@ -55,6 +58,20 @@ bool hasParentPathSegment(const QString &path)
     return std::any_of(parts.cbegin(), parts.cend(), [](const QString &part) {
         return part == QStringLiteral("..");
     });
+}
+
+bool sha256(QFile &file, QByteArray *checksum)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!file.atEnd()) {
+        const QByteArray chunk = file.read(1024 * 1024);
+        if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
+            return false;
+        }
+        hash.addData(chunk);
+    }
+    *checksum = hash.result();
+    return true;
 }
 
 }
@@ -204,6 +221,9 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
 
 bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error) const
 {
+    if (error != nullptr) {
+        error->clear();
+    }
     const QString normalizedRemoteRoot = QDir::cleanPath(remoteRoot);
     if (normalizedRemoteRoot.isEmpty() || normalizedRemoteRoot == QStringLiteral(".")
         || hasParentPathSegment(normalizedRemoteRoot)) {
@@ -228,6 +248,8 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     QStringList expectedItems;
     QStringList failedItems;
     QStringList sourcePrefixes;
+    QSet<QString> remotePaths;
+    remotePaths.insert(QStringLiteral("manifest.json"));
     QString providerError;
     if (!provider.ensureDirectory(normalizedRemoteRoot, &providerError)) {
         if (error != nullptr) {
@@ -262,7 +284,13 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         const QString mappedPath = sourceDirectories.size() > 1
             ? QDir(sourcePrefixes.at(sourceIndex)).filePath(relativePath)
             : relativePath;
-        const QString remotePath = QDir(normalizedRemoteRoot).filePath(mappedPath);
+        QString remoteMappedPath = mappedPath;
+        int suffix = 1;
+        while (remotePaths.contains(remoteMappedPath)) {
+            remoteMappedPath = QStringLiteral("%1.%2").arg(mappedPath).arg(suffix++);
+        }
+        remotePaths.insert(remoteMappedPath);
+        const QString remotePath = QDir(normalizedRemoteRoot).filePath(remoteMappedPath);
         expectedItems.append(mappedPath);
         providerError.clear();
 
@@ -273,7 +301,12 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
             continue;
         }
         const qint64 sourceSize = sourceFile.size();
-        const QByteArray sourceChecksum = QCryptographicHash::hash(sourceFile.readAll(), QCryptographicHash::Sha256);
+        QByteArray sourceChecksum;
+        if (!sha256(sourceFile, &sourceChecksum)) {
+            failures.append(QStringLiteral("The source file could not be read."));
+            failedItems.append(mappedPath);
+            continue;
+        }
         RemoteFile remoteFile;
         const bool alreadyVerified = provider.inspect(remotePath, &remoteFile, &providerError)
             && remoteFile.size == sourceSize
@@ -316,8 +349,14 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
 
     const QString manifestDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath(
-        QStringLiteral("praefectus-manifest-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    QDir().mkpath(manifestDirectory);
+        QStringLiteral("custos-manifest-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!QDir().mkpath(manifestDirectory)
+        || !QFile::setPermissions(manifestDirectory, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Unable to create the backup manifest folder.");
+        }
+        return false;
+    }
     const QString path = QDir(manifestDirectory).filePath(QStringLiteral("manifest.json"));
     QSaveFile manifest(path);
     const bool incomplete = !failures.isEmpty() || !selection.missingPaths.isEmpty() || !selection.skippedPaths.isEmpty();
@@ -330,7 +369,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         {QStringLiteral("entries"), entries},
     };
     if (!metadata.copyId.isEmpty()) {
-        manifestObject.insert(QStringLiteral("application"), QStringLiteral("praefectus"));
+        manifestObject.insert(QStringLiteral("application"), QStringLiteral("custos"));
         manifestObject.insert(QStringLiteral("computer"), metadata.computerName);
         manifestObject.insert(QStringLiteral("set_id"), metadata.setId);
         manifestObject.insert(QStringLiteral("set_name"), metadata.setName);
@@ -348,8 +387,9 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         manifestObject.insert(QStringLiteral("expected"), expected);
         manifestObject.insert(QStringLiteral("failed"), failed);
     }
+    const QByteArray manifestContents = QJsonDocument(manifestObject).toJson();
     if (!manifest.open(QIODevice::WriteOnly)
-        || manifest.write(QJsonDocument(manifestObject).toJson()) == -1
+        || manifest.write(manifestContents) != manifestContents.size()
         || !manifest.commit()) {
         if (error != nullptr) {
             *error = QStringLiteral("Unable to write the backup manifest.");
@@ -392,6 +432,9 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
 
 bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinationDirectory, BackupProvider &provider, QString *error) const
 {
+    if (error != nullptr) {
+        error->clear();
+    }
     const QString relativePath = entry.restorePath.isEmpty()
         ? (entry.sourcePath.startsWith('/') ? QFileInfo(entry.sourcePath).fileName() : entry.sourcePath)
         : entry.restorePath;
@@ -416,6 +459,7 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
     const QString canonicalRoot = QFileInfo(destinationDirectory).canonicalFilePath();
     const QString destinationParent = QFileInfo(destination).absolutePath();
     if (canonicalRoot.isEmpty() || QFileInfo(destinationDirectory).isSymLink()
+        || QFileInfo(destination).isSymLink()
         || !QDir().mkpath(destinationParent)) {
         if (error != nullptr) {
             *error = QStringLiteral("The restore destination is outside the selected folder.");
@@ -437,13 +481,16 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         return false;
     }
 
-    if (!provider.download(entry.remotePath, destination, error)) {
+    const QString temporaryDestination = QStringLiteral("%1.custos-restore-%2")
+        .arg(destination, QUuid::createUuid().toString(QUuid::WithoutBraces));
+    if (!provider.download(entry.remotePath, temporaryDestination, error)) {
+        QFile::remove(temporaryDestination);
         return false;
     }
 
-    QFile restoredFile(destination);
+    QFile restoredFile(temporaryDestination);
     if (!restoredFile.open(QIODevice::ReadOnly)) {
-        QFile::remove(destination);
+        QFile::remove(temporaryDestination);
         if (error != nullptr) {
             *error = QStringLiteral("The restored file could not be opened for verification.");
         }
@@ -451,15 +498,32 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         return false;
     }
 
-    const QByteArray checksum = QCryptographicHash::hash(restoredFile.readAll(), QCryptographicHash::Sha256);
-    if (restoredFile.size() != entry.size
+    QByteArray checksum;
+    const bool hashed = sha256(restoredFile, &checksum);
+    if (!hashed || restoredFile.size() != entry.size
         || (!entry.checksum.isEmpty() && checksum != entry.checksum)) {
         restoredFile.close();
-        QFile::remove(destination);
+        QFile::remove(temporaryDestination);
         if (error != nullptr) {
             *error = QStringLiteral("The restored file failed verification.");
         }
 
+        return false;
+    }
+
+    restoredFile.close();
+    if (QFileInfo::exists(destination) && !QFile::remove(destination)) {
+        QFile::remove(temporaryDestination);
+        if (error != nullptr) {
+            *error = QStringLiteral("The restore destination could not be replaced.");
+        }
+        return false;
+    }
+    if (!QFile::rename(temporaryDestination, destination)) {
+        QFile::remove(temporaryDestination);
+        if (error != nullptr) {
+            *error = QStringLiteral("The restored file could not be placed in the destination folder.");
+        }
         return false;
     }
 

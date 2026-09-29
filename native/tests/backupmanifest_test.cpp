@@ -15,10 +15,12 @@ private slots:
     void rejectsTraversalPaths();
     void acceptsDotsInsideFileNames();
     void acceptsAbsoluteRemotePaths();
+    void rejectsCompleteCopyWithMissingExpectedEntry();
     void rejectsMalformedEntries();
     void rejectsNullOutput();
     void restoresOnlyTheSelectedFile();
     void rejectsTamperedRestore();
+    void preservesExistingDestinationWhenRestoreFails();
     void rejectsRestoreThroughDestinationSymlink();
 };
 
@@ -98,6 +100,37 @@ void BackupManifestTest::rejectsTamperedRestore()
     QVERIFY(!QFileInfo::exists(destination.filePath(QStringLiteral("selected.txt"))));
 }
 
+void BackupManifestTest::preservesExistingDestinationWhenRestoreFails()
+{
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(remote.isValid());
+    QVERIFY(destination.isValid());
+    QDir().mkpath(remote.filePath(QStringLiteral("copy")));
+
+    QFile selected(remote.filePath(QStringLiteral("copy/selected.txt")));
+    QVERIFY(selected.open(QIODevice::WriteOnly));
+    selected.write("selected");
+    selected.close();
+    QFile existing(destination.filePath(QStringLiteral("selected.txt")));
+    QVERIFY(existing.open(QIODevice::WriteOnly));
+    existing.write("keep this");
+    existing.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString error;
+    QVERIFY(!engine.restoreFile({
+        QStringLiteral("/source/selected.txt"),
+        QStringLiteral("copy/selected.txt"),
+        8,
+        QCryptographicHash::hash("different", QCryptographicHash::Sha256),
+    }, destination.path(), provider, &error));
+
+    QVERIFY(existing.open(QIODevice::ReadOnly));
+    QCOMPARE(existing.readAll(), QByteArray("keep this"));
+}
+
 void BackupManifestTest::rejectsRestoreThroughDestinationSymlink()
 {
     QTemporaryDir remote;
@@ -171,6 +204,22 @@ void BackupManifestTest::acceptsAbsoluteRemotePaths()
     QVector<BackupEntry> entries;
     QVERIFY(BackupManifest::load(path, &entries));
     QCOMPARE(entries.first().remotePath, QStringLiteral("/my-files/backups/file.txt"));
+}
+
+void BackupManifestTest::rejectsCompleteCopyWithMissingExpectedEntry()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("manifest.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({"version":2,"application":"custos","computer":"computer","set_id":"set","set_name":"Set","copy_id":"copy","created_at":"2026-09-28T12:00:00.000Z","status":"complete","expected":["file.txt"],"failed":[],"entries":[]})");
+    file.close();
+
+    QVector<BackupEntry> entries;
+    QString error;
+    QVERIFY(!BackupManifest::load(path, &entries, &error));
+    QCOMPARE(error, QStringLiteral("The backup manifest is malformed or unsupported."));
 }
 
 void BackupManifestTest::rejectsMalformedEntries()

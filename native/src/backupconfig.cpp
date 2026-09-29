@@ -6,8 +6,34 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QSet>
 
 #include <algorithm>
+
+namespace {
+
+bool validSchedule(const BackupSchedule &schedule)
+{
+    return (schedule.frequency == QStringLiteral("disabled")
+            || schedule.frequency == QStringLiteral("daily")
+            || schedule.frequency == QStringLiteral("weekly")
+            || schedule.frequency == QStringLiteral("monthly"))
+        && schedule.hour >= 0 && schedule.hour <= 23
+        && schedule.minute >= 0 && schedule.minute <= 59
+        && schedule.weekday >= 1 && schedule.weekday <= 7
+        && schedule.dayOfMonth >= 1 && schedule.dayOfMonth <= 31;
+}
+
+bool validHex(const QString &value)
+{
+    return value.size() % 2 == 0 && std::all_of(value.cbegin(), value.cend(), [](const QChar character) {
+        const QChar lower = character.toLower();
+        return (character >= QChar('0') && character <= QChar('9'))
+            || (lower >= QChar('a') && lower <= QChar('f'));
+    });
+}
+
+}
 
 BackupConfigStore::BackupConfigStore(QString path)
     : path(std::move(path))
@@ -23,7 +49,7 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
 {
     if (config == nullptr) {
         if (error != nullptr) {
-            *error = QStringLiteral("A destination for native backup configuration is required.");
+            *error = QStringLiteral("A destination for Custos backup configuration is required.");
         }
 
         return false;
@@ -32,7 +58,7 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         if (error != nullptr) {
-            *error = QStringLiteral("The native backup configuration could not be opened.");
+            *error = QStringLiteral("The Custos backup configuration could not be opened.");
         }
 
         return false;
@@ -43,7 +69,7 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
     const QJsonObject object = document.object();
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The native backup configuration is malformed.");
+            *error = QStringLiteral("The Custos backup configuration is malformed.");
         }
 
         return false;
@@ -56,16 +82,17 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
         const QJsonValue setsValue = object.value(QStringLiteral("sets"));
         if (!setsValue.isArray() || config->protonBinary.isEmpty()) {
             if (error != nullptr) {
-                *error = QStringLiteral("The native backup configuration is malformed.");
+                *error = QStringLiteral("The Custos backup configuration is malformed.");
             }
 
             return false;
         }
 
+        QSet<QString> setIds;
         for (const QJsonValue &setValue : setsValue.toArray()) {
             if (!setValue.isObject()) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("The native backup configuration contains an invalid set.");
+                    *error = QStringLiteral("The Custos backup configuration contains an invalid set.");
                 }
 
                 return false;
@@ -97,30 +124,43 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
             set.onlyOnAcPower = setObject.value(QStringLiteral("only_on_ac_power")).toBool(false);
             for (const QJsonValue &volumeValue : setObject.value(QStringLiteral("required_volumes")).toArray()) {
                 const QJsonObject volume = volumeValue.toObject();
+                const QString deviceId = volume.value(QStringLiteral("device_id")).toString();
+                if (!volumeValue.isObject() || !validHex(deviceId)) {
+                    if (error != nullptr) {
+                        *error = QStringLiteral("The Custos backup configuration is malformed.");
+                    }
+                    return false;
+                }
                 set.requiredVolumes.append({
                     volume.value(QStringLiteral("mount_path")).toString(),
-                    QByteArray::fromHex(volume.value(QStringLiteral("device_id")).toString().toLatin1()),
+                    QByteArray::fromHex(deviceId.toLatin1()),
                 });
             }
 
-            if (set.id.isEmpty() || set.name.isEmpty() || set.remoteRoot.isEmpty()
+            if (set.id.trimmed().isEmpty() || set.name.trimmed().isEmpty() || set.remoteRoot.trimmed().isEmpty()
                 || set.sourceDirectories.isEmpty()
+                || !validSchedule(set.schedule)
+                || setIds.contains(set.id)
                 || std::any_of(set.sourceDirectories.cbegin(), set.sourceDirectories.cend(), [](const QString &source) {
-                    return source.isEmpty();
+                    return source.trimmed().isEmpty();
+                })
+                || std::any_of(set.requiredVolumes.cbegin(), set.requiredVolumes.cend(), [](const RequiredVolume &volume) {
+                    return volume.mountPath.trimmed().isEmpty();
                 })) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("The native backup configuration is incomplete.");
+                    *error = QStringLiteral("The Custos backup configuration is incomplete.");
                 }
 
                 return false;
             }
 
+            setIds.insert(set.id);
             config->sets.append(set);
         }
 
         if (config->sets.isEmpty()) {
             if (error != nullptr) {
-                *error = QStringLiteral("The native backup configuration is incomplete.");
+                *error = QStringLiteral("The Custos backup configuration is incomplete.");
             }
 
             return false;
@@ -136,7 +176,7 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
     const QString remote = object.value(QStringLiteral("remote_root")).toString();
     if (source.isEmpty() || remote.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The native backup configuration is incomplete.");
+            *error = QStringLiteral("The Custos backup configuration is incomplete.");
         }
 
         return false;
@@ -161,7 +201,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
 {
     if (config.protonBinary.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The native backup configuration is incomplete.");
+            *error = QStringLiteral("The Custos backup configuration is incomplete.");
         }
 
         return false;
@@ -173,20 +213,23 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
 
     if (!config.sets.isEmpty()) {
         QJsonArray sets;
+        QSet<QString> setIds;
         for (const BackupSet &set : config.sets) {
-            if (set.id.isEmpty() || set.name.isEmpty() || set.remoteRoot.isEmpty() || set.sourceDirectories.isEmpty()) {
+            if (set.id.trimmed().isEmpty() || set.name.trimmed().isEmpty() || set.remoteRoot.trimmed().isEmpty()
+                || set.sourceDirectories.isEmpty() || !validSchedule(set.schedule) || setIds.contains(set.id)) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("The native backup configuration is incomplete.");
+                    *error = QStringLiteral("The Custos backup configuration is incomplete.");
                 }
 
                 return false;
             }
+            setIds.insert(set.id);
 
             QJsonArray sources;
             for (const QString &source : set.sourceDirectories) {
-                if (source.isEmpty()) {
+                if (source.trimmed().isEmpty()) {
                     if (error != nullptr) {
-                        *error = QStringLiteral("The native backup configuration is incomplete.");
+                        *error = QStringLiteral("The Custos backup configuration is incomplete.");
                     }
 
                     return false;
@@ -203,7 +246,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
             for (const RequiredVolume &volume : set.requiredVolumes) {
                 if (volume.mountPath.trimmed().isEmpty()) {
                     if (error != nullptr) {
-                        *error = QStringLiteral("The native backup configuration is incomplete.");
+                        *error = QStringLiteral("The Custos backup configuration is incomplete.");
                     }
 
                     return false;
@@ -238,7 +281,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
     } else {
         if (config.sourceDirectory.isEmpty() || config.remoteRoot.isEmpty()) {
             if (error != nullptr) {
-                *error = QStringLiteral("The native backup configuration is incomplete.");
+                *error = QStringLiteral("The Custos backup configuration is incomplete.");
             }
 
             return false;
@@ -250,7 +293,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
 
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to create the native configuration directory.");
+            *error = QStringLiteral("Unable to create the Custos configuration directory.");
         }
 
         return false;
@@ -259,7 +302,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to write the native backup configuration.");
+            *error = QStringLiteral("Unable to write the Custos backup configuration.");
         }
 
         return false;
@@ -269,7 +312,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
 
     if (file.write(contents) != contents.size() || !file.commit()) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to finish writing the native backup configuration.");
+            *error = QStringLiteral("Unable to finish writing the Custos backup configuration.");
         }
 
         return false;

@@ -12,6 +12,7 @@
 #include <QCommandLineParser>
 #include <QDebug>
 #include <QDir>
+#include <QFileInfo>
 #include <QLockFile>
 #include <QSysInfo>
 #include <QUuid>
@@ -61,11 +62,17 @@ int main(int argc, char *argv[])
     parser.addOption({{"c", "config"}, QStringLiteral("Configuration file."), QStringLiteral("path")});
     parser.process(application);
 
-    const QString configPath = parser.value(QStringLiteral("config")).isEmpty()
-        ? QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"))
+    const QString configuredPath = parser.value(QStringLiteral("config")).isEmpty()
+        ? QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"))
         : parser.value(QStringLiteral("config"));
+    const QString configPath = QFileInfo(configuredPath).absoluteFilePath();
     QLockFile processLock(configPath + QStringLiteral(".worker.lock"));
     if (!processLock.tryLock(0)) {
+        return 0;
+    }
+    const QString stateDirectory = QFileInfo(configPath).absolutePath();
+    QLockFile runStateLock(QDir(stateDirectory).filePath(QStringLiteral("custos-backup-runs.json.lock")));
+    if (!runStateLock.tryLock(0)) {
         return 0;
     }
 
@@ -80,13 +87,13 @@ int main(int argc, char *argv[])
     QProcessRunner runner(config.protonBinary);
     ProtonProvider provider(runner);
     BackupEngine engine;
-    const QString cleanupPath = QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-cleanup.json"));
+    const QString cleanupPath = QDir(stateDirectory).filePath(QStringLiteral("custos-backup-cleanup.json"));
     CleanupStore cleanupStore(cleanupPath);
     if (!cleanupStore.load(&error)) {
         qCritical().noquote() << error;
         return 1;
     }
-    BackupRunStore runStore(QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-runs.json")));
+    BackupRunStore runStore(QDir(stateDirectory).filePath(QStringLiteral("custos-backup-runs.json")));
     if (!runStore.load(&error)) {
         qCritical().noquote() << error;
 
@@ -98,9 +105,16 @@ int main(int argc, char *argv[])
         const QDateTime now = QDateTime::currentDateTime();
         if (set.schedule.enabled()) {
             QDateTime due = record->nextScheduled;
+            if (record->lastScheduled.isValid()) {
+                const QDateTime recalculated = BackupScheduleCalculator::nextRun(set.schedule, record->lastScheduled);
+                if (recalculated.isValid() && recalculated != due) {
+                    due = recalculated;
+                    record->nextScheduled = recalculated;
+                }
+            }
             if (!due.isValid()) {
                 const QDateTime currentDue = BackupScheduleCalculator::dueRun(set.schedule, now);
-                if (currentDue.isValid() && currentDue.date() == now.date() && currentDue <= now) {
+                if (currentDue.isValid() && currentDue <= now) {
                     due = currentDue;
                 } else {
                     record->nextScheduled = BackupScheduleCalculator::nextRun(set.schedule, now);

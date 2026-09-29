@@ -15,7 +15,7 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
     const QFileInfo worker(workerPath);
     if (!worker.isAbsolute() || !worker.isFile() || !worker.isExecutable()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The native worker must be an executable absolute path.");
+            *error = QStringLiteral("The Custos worker must be an executable absolute path.");
         }
 
         return false;
@@ -37,7 +37,7 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
         return false;
     }
 
-    const QString path = QDir(serviceDirectory).filePath(QStringLiteral("praefectus-native.service"));
+    const QString path = QDir(serviceDirectory).filePath(QStringLiteral("custos.service"));
     QSaveFile service(path);
     if (!service.open(QIODevice::WriteOnly)) {
         if (error != nullptr) {
@@ -49,10 +49,10 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
 
     const QByteArray contents = QStringLiteral(
         "[Unit]\n"
-        "Description=Praefectus native backup worker\n\n"
+        "Description=Custos Backup worker\n\n"
         "[Service]\n"
         "Type=oneshot\n"
-        "ExecStart=%1 --config %2/.config/praefectus/native-backup.json\n"
+        "ExecStart=%1 --config %2/.config/custos/custos-backup.json\n"
         "Nice=19\n"
         "CPUQuota=10%\n"
         "IOSchedulingClass=idle\n"
@@ -67,28 +67,28 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
         return false;
     }
 
-    const QString timerPath = QDir(serviceDirectory).filePath(QStringLiteral("praefectus-native.timer"));
+    const QString timerPath = QDir(serviceDirectory).filePath(QStringLiteral("custos.timer"));
     QSaveFile timer(timerPath);
     if (!timer.open(QIODevice::WriteOnly)) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to write the native systemd timer.");
+            *error = QStringLiteral("Unable to write the Custos systemd timer.");
         }
 
         return false;
     }
     const QByteArray timerContents = QByteArray(
         "[Unit]\n"
-        "Description=Run Praefectus native backup scheduler\n\n"
+        "Description=Run Custos Backup scheduler\n\n"
         "[Timer]\n"
         "OnCalendar=*-*-* *:*:00\n"
         "Persistent=true\n"
-        "Unit=praefectus-native.service\n\n"
+        "Unit=custos.service\n\n"
         "[Install]\n"
         "WantedBy=timers.target\n"
     );
     if (timer.write(timerContents) != timerContents.size() || !timer.commit()) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to finish writing the native systemd timer.");
+            *error = QStringLiteral("Unable to finish writing the Custos systemd timer.");
         }
 
         return false;

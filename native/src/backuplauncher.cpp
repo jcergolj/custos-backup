@@ -3,6 +3,7 @@
 #include "backuprunstore.h"
 
 #include <QDir>
+#include <QLockFile>
 
 #include <algorithm>
 
@@ -15,7 +16,7 @@ BackupLauncher::BackupLauncher(QObject *parent)
 
 void BackupLauncher::startBackup()
 {
-    const QString configPath = QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"));
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"));
     BackupConfig config;
     QString error;
     if (!BackupConfigStore(configPath).load(&config, &error)) {
@@ -24,7 +25,13 @@ void BackupLauncher::startBackup()
         return;
     }
 
-    BackupRunStore runs(QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-runs.json")));
+    const QString runPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup-runs.json"));
+    QLockFile runStateLock(runPath + QStringLiteral(".lock"));
+    if (!runStateLock.tryLock(0)) {
+        emit failed(QStringLiteral("A backup queue update is already in progress."));
+        return;
+    }
+    BackupRunStore runs(runPath);
     if (!runs.load(&error)) {
         emit failed(error);
 
@@ -45,7 +52,7 @@ void BackupLauncher::startBackup()
 
 void BackupLauncher::startBackup(const QString &setId)
 {
-    const QString configPath = QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"));
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"));
     BackupConfig config;
     QString error;
     if (!BackupConfigStore(configPath).load(&config, &error)) {
@@ -59,7 +66,13 @@ void BackupLauncher::startBackup(const QString &setId)
         emit failed(QStringLiteral("The selected backup set no longer exists."));
         return;
     }
-    BackupRunStore runs(QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-runs.json")));
+    const QString runPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup-runs.json"));
+    QLockFile runStateLock(runPath + QStringLiteral(".lock"));
+    if (!runStateLock.tryLock(0)) {
+        emit failed(QStringLiteral("A backup queue update is already in progress."));
+        return;
+    }
+    BackupRunStore runs(runPath);
     if (!runs.load(&error) || !runs.enqueue(setId, QStringLiteral("manual"), QDateTime::currentDateTime())) {
         emit failed(error.isEmpty() ? QStringLiteral("The selected backup set is already queued.") : error);
         return;
@@ -76,9 +89,9 @@ void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &
     BackupConfig config {
         sourceDirectory,
         remoteRoot,
-        qEnvironmentVariable("PRAEFECTUS_PROTON_BIN", QStringLiteral("proton-drive")),
+        qEnvironmentVariable("CUSTOS_PROTON_BIN", QStringLiteral("proton-drive")),
     };
-    const QString configPath = QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup.json"));
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"));
     QString error;
     if (!BackupConfigStore(configPath).save(config, &error)) {
         emit failed(error);
@@ -86,7 +99,13 @@ void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &
         return;
     }
 
-    BackupRunStore runs(QDir::home().filePath(QStringLiteral(".config/praefectus/native-backup-runs.json")));
+    const QString runPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup-runs.json"));
+    QLockFile runStateLock(runPath + QStringLiteral(".lock"));
+    if (!runStateLock.tryLock(0)) {
+        emit failed(QStringLiteral("A backup queue update is already in progress."));
+        return;
+    }
+    BackupRunStore runs(runPath);
     if (!runs.load(&error)) {
         emit failed(error.isEmpty() ? QStringLiteral("Unable to queue the backup.") : error);
 
@@ -105,7 +124,7 @@ void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &
 void BackupLauncher::startService()
 {
     QString error;
-    if (!systemd.startUserService(QStringLiteral("praefectus-native.service"), &error)) {
+    if (!systemd.startUserService(QStringLiteral("custos.service"), &error)) {
         emit failed(error);
 
         return;

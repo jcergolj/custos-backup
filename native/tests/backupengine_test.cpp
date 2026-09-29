@@ -16,6 +16,7 @@ private slots:
     void listsRegularFilesAndSkipsSymlinks();
     void backsUpVerifiesAndRestoresOneFile();
     void backsUpStoresVerifiedChecksum();
+    void reservesManifestPathForSourceFiles();
     void previewsMultipleSourcesAndExclusions();
     void backsUpMultipleSourcesWithoutCollisions();
     void preservesVerifiedItemsInAnIncompleteCopy();
@@ -28,7 +29,7 @@ void BackupEngineTest::rejectsMissingSource()
     BackupEngine engine;
     QString error;
 
-    QVERIFY(!engine.validateSelection(QStringLiteral("/tmp/praefectus-does-not-exist"), &error));
+    QVERIFY(!engine.validateSelection(QStringLiteral("/tmp/custos-does-not-exist"), &error));
     QCOMPARE(error, QStringLiteral("The selected folder does not exist."));
 }
 
@@ -108,6 +109,35 @@ void BackupEngineTest::backsUpStoresVerifiedChecksum()
     QCOMPARE(entries.size(), 1);
     QCOMPARE(entries.first().checksum,
         QCryptographicHash::hash("important content", QCryptographicHash::Sha256));
+}
+
+void BackupEngineTest::reservesManifestPathForSourceFiles()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+
+    QFile original(source.filePath(QStringLiteral("manifest.json")));
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    original.write("source manifest");
+    original.close();
+
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QString manifestPath;
+    QString error;
+    QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
+
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifestPath, &entries, &error));
+    QCOMPARE(entries.size(), 1);
+    QVERIFY(entries.first().remotePath != QStringLiteral("copy/manifest.json"));
+    QVERIFY(QFileInfo::exists(remote.filePath(QStringLiteral("copy/manifest.json"))));
+
+    QFile stored(remote.filePath(entries.first().remotePath));
+    QVERIFY(stored.open(QIODevice::ReadOnly));
+    QCOMPARE(stored.readAll(), QByteArray("source manifest"));
 }
 
 void BackupEngineTest::previewsMultipleSourcesAndExclusions()
@@ -266,6 +296,19 @@ void BackupEngineTest::localProviderRejectsUnsafePaths()
 
     error.clear();
     QVERIFY(!provider.inspect(QStringLiteral("/absolute/file"), nullptr, &error));
+    QCOMPARE(error, QStringLiteral("The provider path is invalid."));
+
+    QTemporaryDir outside;
+    QVERIFY(outside.isValid());
+    QFile outsideFile(outside.filePath(QStringLiteral("outside.txt")));
+    QVERIFY(outsideFile.open(QIODevice::WriteOnly));
+    outsideFile.write("outside");
+    outsideFile.close();
+    QVERIFY(QFile::link(outsideFile.fileName(), remote.filePath(QStringLiteral("link.txt"))));
+    QVERIFY(!provider.inspect(QStringLiteral("link.txt"), nullptr, &error));
+    QCOMPARE(error, QStringLiteral("The provider path is invalid."));
+    QVERIFY(QFile::link(outside.path(), remote.filePath(QStringLiteral("link-dir"))));
+    QVERIFY(!provider.ensureDirectory(QStringLiteral("link-dir/new"), &error));
     QCOMPARE(error, QStringLiteral("The provider path is invalid."));
 }
 

@@ -43,12 +43,12 @@ void BackupJobTest::reportsVerifiedSuccess()
 void BackupJobTest::reportsFailureWithoutSuccess()
 {
     BackupEngine engine;
-    LocalProvider provider(QStringLiteral("/tmp/praefectus-no-provider"));
+    LocalProvider provider(QStringLiteral("/tmp/custos-no-provider"));
     BackupJob job(engine);
     QSignalSpy failed(&job, &BackupJob::failed);
     QSignalSpy succeeded(&job, &BackupJob::succeeded);
 
-    job.run(QStringLiteral("/tmp/praefectus-does-not-exist"), QStringLiteral("copy"), provider);
+    job.run(QStringLiteral("/tmp/custos-does-not-exist"), QStringLiteral("copy"), provider);
 
     QCOMPARE(failed.count(), 1);
     QCOMPARE(failed.at(0).at(0).toString(), QStringLiteral("The selected folder contains no regular files."));

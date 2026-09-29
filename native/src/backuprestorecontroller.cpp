@@ -24,7 +24,7 @@ QStringList BackupRestoreController::entries() const
 
 QString BackupRestoreController::defaultDestination() const
 {
-    return QDir::home().filePath(QStringLiteral("Praefectus restore"));
+    return QDir::home().filePath(QStringLiteral("Custos restore"));
 }
 
 QStringList BackupRestoreController::copies() const
@@ -53,7 +53,10 @@ void BackupRestoreController::setCopySearch(const QString &search)
         return;
     }
     searchText = search;
+    selectedCopyIndex = -1;
+    manifestEntries.clear();
     emit copiesChanged();
+    emit entriesChanged();
 }
 
 QVector<int> BackupRestoreController::filteredCopyIndexes() const
@@ -88,6 +91,9 @@ void BackupRestoreController::loadManifest(const QString &path)
     QString error;
     if (!BackupManifest::load(path, &loadedEntries, &error)) {
         manifestEntries.clear();
+        remoteCopies.clear();
+        selectedCopyIndex = -1;
+        emit copiesChanged();
         emit entriesChanged();
         emit failed(error);
 

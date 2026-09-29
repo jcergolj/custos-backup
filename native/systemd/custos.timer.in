@@ -1,10 +1,10 @@
 [Unit]
-Description=Run Praefectus native backup scheduler
+Description=Run Custos Backup scheduler
 
 [Timer]
 OnCalendar=*-*-* *:*:00
 Persistent=true
-Unit=praefectus-native.service
+Unit=custos.service
 
 [Install]
 WantedBy=timers.target
