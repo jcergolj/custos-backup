@@ -14,8 +14,9 @@ ApplicationWindow {
     property bool showEditor: false
     property bool showRestore: false
     property bool backupRunning: backupSetController.currentRunStatus === "running"
-    property string displayFontFamily: "serif"
-    property string bodyFontFamily: "sans-serif"
+    property string systemFontFamily: Qt.application.font.family
+    property string displayFontFamily: systemFontFamily
+    property string bodyFontFamily: systemFontFamily
     property int displayTypeSize: 34
     property int pageTitleSize: 24
     property int sectionTitleSize: 16
@@ -23,6 +24,8 @@ ApplicationWindow {
     property int metadataTypeSize: 12
     property real bodyLeading: 1.4
     property int readableMeasure: 680
+    property int contentPadding: 24
+    property int cardPadding: 12
     property color accentColor: osPalette.window.hslLightness < 0.5 ? "#8AB4F8" : "#2457A6"
 
     SystemPalette {
@@ -192,9 +195,9 @@ ApplicationWindow {
             font.weight: Font.Bold
             font.letterSpacing: 0.4
             color: root.accentColor
-            Layout.leftMargin: 24
-            Layout.topMargin: 18
-            Layout.bottomMargin: 10
+            Layout.leftMargin: root.contentPadding
+            Layout.topMargin: 24
+            Layout.bottomMargin: 16
         }
 
         StackLayout {
@@ -210,9 +213,9 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    spacing: 16
+                    anchors.leftMargin: root.contentPadding
+                    anchors.rightMargin: root.contentPadding
+                    spacing: 20
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -237,6 +240,7 @@ ApplicationWindow {
                         font.family: root.bodyFontFamily
                         font.pixelSize: root.sectionTitleSize
                         font.weight: Font.Bold
+                        padding: root.cardPadding
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(84, Math.min(260, dashboardSetsList.contentHeight + 56))
 
@@ -250,11 +254,11 @@ ApplicationWindow {
                                 required property int index
                                 required property string modelData
                                 width: dashboardSetsList.width
-                                implicitHeight: 52
+                                implicitHeight: 64
 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.margins: 8
+                                    anchors.margins: root.cardPadding
 
                                     Label {
                                         text: modelData
@@ -311,6 +315,7 @@ ApplicationWindow {
                         font.family: root.bodyFontFamily
                         font.pixelSize: root.sectionTitleSize
                         font.weight: Font.Bold
+                        padding: root.cardPadding
                         width: parent.width
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(110, Math.min(420, recentBackupsList.contentHeight + 64))
@@ -341,19 +346,21 @@ ApplicationWindow {
                                     required property int index
                                 required property string modelData
                                 width: recentBackupsList.width
-                                implicitHeight: 52
+                                implicitHeight: 76
 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.margins: 8
+                                    anchors.margins: root.cardPadding
 
                                     Label {
                                         id: summaryLabel
-                                        text: modelData.replace(/\r?\n/, " | ")
+                                        text: modelData
                                             + (backupSetController.recentBackupTimestamps[index].length > 0
-                                                ? qsTr(" | Last activity: %1").arg(backupSetController.recentBackupTimestamps[index])
+                                                ? qsTr("\nLast activity: %1").arg(backupSetController.recentBackupTimestamps[index])
                                                 : "")
-                                        elide: Text.ElideRight
+                                        wrapMode: Text.WordWrap
+                                        lineHeight: root.bodyLeading
+                                        lineHeightMode: Text.ProportionalHeight
                                         font.pixelSize: root.bodyTypeSize
                                         Layout.fillWidth: true
                                     }
@@ -374,6 +381,7 @@ ApplicationWindow {
                         font.family: root.bodyFontFamily
                         font.pixelSize: root.sectionTitleSize
                         font.weight: Font.Bold
+                        padding: root.cardPadding
                         visible: root.showRestore
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(320, restoreContent.implicitHeight + 32)
@@ -381,7 +389,7 @@ ApplicationWindow {
                         ColumnLayout {
                             id: restoreContent
                             anchors.fill: parent
-                            spacing: 12
+                            spacing: 16
 
                             Label {
                                 text: qsTr("Choose a remote copy, then select files or a folder to restore.")
@@ -524,9 +532,9 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    spacing: 16
+                    anchors.leftMargin: root.contentPadding
+                    anchors.rightMargin: root.contentPadding
+                    spacing: 20
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -720,7 +728,7 @@ ApplicationWindow {
 
             Flow {
                 width: parent.width
-                spacing: 8
+                spacing: 12
 
                 Label {
                     text: qsTr("Retain successful copies")
@@ -739,7 +747,7 @@ ApplicationWindow {
 
             Flow {
                 width: parent.width
-                spacing: 8
+                spacing: 12
 
                 Label {
                     text: qsTr("Schedule")
@@ -764,7 +772,7 @@ ApplicationWindow {
             Flow {
                 visible: scheduleFrequency.currentText === "weekly"
                 width: parent.width
-                spacing: 8
+                spacing: 12
 
                 Label {
                     text: qsTr("Run every week on:")
@@ -781,7 +789,7 @@ ApplicationWindow {
             Flow {
                 visible: scheduleFrequency.currentText === "monthly"
                 width: parent.width
-                spacing: 8
+                spacing: 12
 
                 Label {
                     text: qsTr("Run every month on day:")
