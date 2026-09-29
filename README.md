@@ -1,39 +1,22 @@
-# Praefectus Native
+# Praefectus Backup
 
-Praefectus is a small Qt desktop application for backing up selected files and
-folders to Proton Drive. It runs as the logged-in user, uses Proton's official
-`proton-drive` CLI, and keeps the backup worker running after the window closes.
-It is not a full system image tool: boot files, filesystem snapshots, and
-consistent live-database backups are outside the scope of this version.
+Praefectus Backup is a small Qt desktop app for backing up selected files and
+folders to Proton Drive. It runs as your user and uses Proton's official
+`proton-drive` CLI. It is intended for personal files and folders, not system
+images, boot files, filesystem snapshots, or consistent live-database backups.
 
-## What It Does
+## Quick Start
 
-- Creates independent named backup sets with separate sources, exclusions, schedules, and retention limits.
-- Backs up ordinary files and hidden paths such as `~/.config`.
-- Skips symbolic links and reports missing or unreadable items instead of silently treating them as backed up.
-- Writes a verified manifest for every copy, including incomplete copies and their failed items.
-- Stores copies below `remote-root/<computer>/<set>/<copy-id>/`, so every run is independently restorable.
-- Restores selected verified files or folders without downloading unrelated files.
-- Discovers copies from a fresh installation using remote manifests; old local settings are not required and old schedules are never reactivated.
-- Retains three successful copies by default and removes only positively identified Praefectus copies for the correct set.
+### 1. Install
 
-## Install On Omarchy
-
-The intended Omarchy distribution is an Arch package, just like OmaWrite. Once
-the package is published in the Omarchy package repository, install it with:
-
-```bash
-omarchy pkg add praefectus-native
-```
-
-For the AUR package:
+The package name is `praefectus-native-git`. On Omarchy, install it from the
+AUR when it is available:
 
 ```bash
 omarchy pkg aur add praefectus-native-git
 ```
 
-If the AUR package is not available yet, build the included recipe from a
-checkout:
+Until the AUR entry is available, build the public recipe directly:
 
 ```bash
 sudo pacman -S --needed base-devel git
@@ -42,10 +25,18 @@ cd praefectus-castri-posterioris/pkgbuild
 makepkg -Csi
 ```
 
-The package installs `praefectus-native`, `praefectus-native-worker`, an
-application launcher, an icon, and user systemd units. It does not package
-Proton's CLI. Install `proton-drive` using the supported package or release
-source for your system, then check it:
+The package installs the `praefectus-native` app and worker, the **Praefectus
+Backup** launcher entry, and user systemd units. Start it from the Omarchy
+launcher with `Super+Space`, or run:
+
+```bash
+praefectus-native
+```
+
+### 2. Authenticate Proton Drive
+
+Install the `proton-drive` CLI using the package or release source supported by
+your system. Authenticate it as the same user who will run Praefectus:
 
 ```bash
 command -v proton-drive
@@ -53,26 +44,27 @@ proton-drive auth login
 proton-drive filesystem info /my-files
 ```
 
-The app never asks for or stores the Proton password. Authentication belongs to
-the CLI's supported credential flow.
+Praefectus never asks for or stores your Proton password.
 
-The installed CLI was checked against its command help and JSON output. Uploads
-use a parent folder plus replace conflict strategy; downloads use remove
-conflict strategy; discovery uses `filesystem list`; cleanup uses per-item
-`trash` followed by `delete`. The CLI reports remote byte sizes and an optional
-SHA-256 field is used when available. Current Proton metadata normally exposes
-size and a non-verified SHA-1 digest instead, so backups verify the remote size
-and the manifest records the local SHA-256 for restore-time verification. The
-app never uses `empty-trash`.
+### 3. Create and run a backup
 
-After installation, Praefectus appears in the Omarchy applications launcher
-opened with `Super+Space` as **Praefectus**. Start it there or run:
+1. Open **Praefectus Backup** and create a backup set.
+2. Enter one source file or folder per line. Hidden paths such as `~/.config` are valid.
+3. Add exclusions if needed and press **Preview**.
+4. Review included, excluded, skipped, and missing paths.
+5. Set a remote root, for example `/my-files/backups`, and save the set.
+6. Press **Back up** for the first run.
 
-```bash
-praefectus-native
-```
+Each backup set has its own sources, exclusions, schedule, retention value, and
+optional external-drive or AC-power requirements.
 
-Create and save at least one backup set in the app, then enable scheduled work:
+Schedules can be daily, weekly, or monthly. If a monthly day does not exist in
+the current month, the last day of that month is used.
+
+### 4. Enable scheduling
+
+Scheduling is not enabled during installation. First save at least one backup
+set and confirm that Proton Drive authentication works:
 
 ```bash
 systemctl --user daemon-reload
@@ -80,20 +72,74 @@ systemctl --user enable --now praefectus-native.timer
 systemctl --user status praefectus-native.timer
 ```
 
-The package install hook prints this command after installation. The timer is
-not enabled automatically because it must not start before the Proton CLI is
-authenticated and a backup set exists.
+The timer runs as your user after login and catches up missed work. It does not
+require user lingering.
 
-The timer runs after login and catches up missed work. It does not require user
-lingering. To stop scheduled work without removing the package:
+## Restore
+
+To restore after reinstalling or moving to another computer:
+
+1. Install Praefectus Backup and authenticate `proton-drive`.
+2. Open the app and enter the old remote root.
+3. Press **Discover remote backups**. Do not recreate a local set first.
+4. Select the computer, set, and verified files to restore.
+5. Choose a separate destination folder and start the restore.
+
+Incomplete copies expose only verified entries. Missing, failed, malformed, or
+unverifiable items are not presented as successful restores.
+
+## Daily Operation
+
+- Use **Preview** before a first backup or after changing sources and exclusions.
+- Retention keeps three verified successful copies by default.
+- Failed or incomplete runs do not remove older successful copies.
+- The first cleanup proposal requires confirmation; later cleanups use the saved decision.
+- To stop scheduling without uninstalling:
 
 ```bash
 systemctl --user disable --now praefectus-native.timer
 ```
 
-## Build From Source
+## Troubleshooting
 
-For development or non-Arch systems:
+Check the worker log:
+
+```bash
+journalctl --user -u praefectus-native.service
+```
+
+Check the timer and Proton CLI:
+
+```bash
+systemctl --user status praefectus-native.timer
+command -v proton-drive
+proton-drive filesystem info /my-files
+```
+
+An external-drive or AC-power requirement makes a set wait instead of creating
+a misleading partial backup. Missing or unreadable source paths are reported
+in the preview and manifest.
+
+## Uninstall
+
+Stop scheduling first if it is enabled, then remove the package:
+
+```bash
+systemctl --user disable --now praefectus-native.timer
+sudo pacman -Rns praefectus-native-git
+```
+
+Package removal does not delete `~/.config/praefectus` or remote backups. Keep
+them if you may need to restore later.
+
+## Technical Documentation
+
+See [Technical Notes](TECHNICAL.md) for remote layout, manifests, verification,
+cleanup behavior, and package/service details.
+
+## Development
+
+Build and test the native app from the repository root:
 
 ```bash
 cmake -S native -B build
@@ -102,90 +148,4 @@ ctest --test-dir build --output-on-failure
 ```
 
 The main binaries are `build/praefectus-native` and
-`build/praefectus-native-worker`. The source installer is also available when
-the worker is built outside the package:
-
-```bash
-build/praefectus-native-install build/praefectus-native-worker
-```
-
-## First Backup
-
-1. Open Praefectus and create a backup set.
-2. Enter one source file or folder per line. Hidden folders such as `~/.config` are valid.
-3. Add exclusions if needed and press **Preview**. Review included, excluded, skipped, and missing paths.
-4. Set the remote root, for example `/my-files/backups`, then save the set.
-5. Press **Back up** for a manual run, or configure a daily, weekly, or monthly schedule.
-
-Each set has its own schedule and retention value. Monthly schedules use the
-last day of the month when the configured day does not exist. An external drive
-can be required, and a set can be limited to AC power; those sets wait instead
-of producing a misleading partial run. The queue and run state are stored at:
-
-```text
-~/.config/praefectus/native-backup.json
-~/.config/praefectus/native-backup-runs.json
-```
-
-## Retention And Cleanup
-
-Retention defaults to three verified successful copies and can be changed per
-set. A failed or incomplete run never deletes an older successful copy.
-
-After a verified success, Praefectus calculates old successful copies and
-eligible incomplete copies for that set. Before the first cleanup it stores the
-exact proposed remote paths and shows them in the UI. Nothing is removed until
-**Confirm proposed cleanup** is pressed. Leaving the decision pending retains
-all proposed copies. Later cleanups are automatic after confirmation.
-
-For Proton Drive, cleanup calls `filesystem trash` for each exact copy and then
-`filesystem delete` for that same item. Praefectus never calls
-`filesystem empty-trash`. If permanent deletion fails after trashing, the
-target and cleanup phase are persisted and the next attempt resumes without
-expanding the deletion scope.
-
-Cleanup state is stored at:
-
-```text
-~/.config/praefectus/native-backup-cleanup.json
-```
-
-## Restore After Reinstall
-
-1. Install Praefectus and authenticate the Proton CLI for the current user.
-2. Open the application on the fresh installation. Do not recreate a local set just to discover old copies.
-3. Enter the old remote root, such as `/my-files/backups`, and press **Discover remote backups**.
-4. Search by computer, set, copy, or status. Select the intended computer and set, then choose a verified file and destination folder.
-5. For an incomplete copy, restore only the listed verified entries. Failed, missing, or unavailable items remain visibly unavailable and are not offered as successful restores.
-
-Remote manifests include computer, set, copy, timestamp, completion status,
-expected items, failed items, file paths, sizes, and checksums. Copies from two
-computers with similarly named sets remain distinguishable by their provenance.
-Malformed or unsupported manifests and files that fail remote verification are
-reported as limitations; they are never presented as successful restores.
-
-The default restore destination is a separate folder. Restored files are
-checked against manifest size and SHA-256 data, and destination traversal or
-symbolic-link escapes are rejected. No recovered metadata is written into the
-local schedule or backup queue.
-
-## Files And Services
-
-Configuration and state live under `~/.config/praefectus`. User units are
-installed under `/usr/lib/systemd/user` by the package:
-
-```text
-praefectus-native.service
-praefectus-native.timer
-```
-
-The worker uses `Nice=19`, idle I/O scheduling, and `CPUQuota=10%` so backups
-remain unobtrusive. Inspect logs with:
-
-```bash
-journalctl --user -u praefectus-native.service
-```
-
-Remove the package with `sudo pacman -Rns praefectus-native-git` or the package name
-provided by the Omarchy repository. User configuration and remote backups
-are deliberately left in place for recovery.
+`build/praefectus-native-worker`. The Arch package recipe is in `pkgbuild/`.

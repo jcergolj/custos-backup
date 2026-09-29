@@ -1,5 +1,5 @@
 [Unit]
-Description=Praefectus native backup worker
+Description=Praefectus Backup worker
 
 [Service]
 Type=oneshot

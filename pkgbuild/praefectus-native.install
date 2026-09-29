@@ -1,7 +1,7 @@
 post_install() {
     update-desktop-database -q >/dev/null 2>&1 || true
     gtk-update-icon-cache -q -t -f usr/share/icons/hicolor >/dev/null 2>&1 || true
-    printf '%s\n' 'Praefectus installed. Authenticate proton-drive, configure a set, then run:'
+    printf '%s\n' 'Praefectus Backup installed. Authenticate proton-drive, configure a set, then run:'
     printf '%s\n' '  systemctl --user enable --now praefectus-native.timer'
 }
 

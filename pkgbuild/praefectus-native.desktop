@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=Praefectus
-GenericName=Backup Manager
-Comment=Back up selected files to Proton Drive
+Name=Praefectus Backup
+GenericName=Backup and Restore
+Comment=Back up and restore selected files with Proton Drive
 Exec=praefectus-native
 TryExec=praefectus-native
 Icon=praefectus-native
 Terminal=false
-Categories=Utility;Archiving;System;
+Categories=Utility;Archiving;
 Keywords=backup;restore;proton;drive;
 StartupWMClass=praefectus-native

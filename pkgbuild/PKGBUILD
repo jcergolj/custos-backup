@@ -1,18 +1,30 @@
 # Maintainer: Praefectus contributors
 
 pkgname=praefectus-native-git
-pkgver=0.1.r1.g0000000
+pkgver=0.1.r31.g500af0b
 pkgrel=1
-pkgdesc='Native Qt backup and selective restore client for Proton Drive'
+pkgdesc='Praefectus Backup client for Proton Drive'
 arch=('x86_64')
 url='https://github.com/jcergolj/praefectus-castri-posterioris'
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative')
 makedepends=('cmake' 'gcc')
 optdepends=('proton-drive: Proton Drive CLI used for backup storage')
+provides=('praefectus-native')
+conflicts=('praefectus-native')
 install='praefectus-native.install'
-source=("$pkgname::git+$url.git")
-sha256sums=('SKIP')
+source=("$pkgname::git+$url.git"
+        'praefectus-native.desktop'
+        'praefectus-native.svg'
+        'praefectus-native.service'
+        'praefectus-native.timer'
+        'LICENSE')
+sha256sums=('SKIP'
+            '75d4a5fd77cda20a9f92c572995982a7dd60adce601c14f5024e58c1881bc751'
+            '616d6c84dd51458faa4fecf561357c33ff48d0c30054017891e1908d679890e9'
+            '9e0fa6ec1814571f3e913e13a841bdcc578935650fad35a5eb4e00c292a8565f'
+            '3938b4cbb7bb4755dca8353d507f4f1e855c41a289a84fc62c5a02d527ad62fb'
+            'e1417669d8da98bc3f2ff4ad7bd24b5913326833cc91750eab4e6711a21d3a91')
 
 pkgver() {
     cd "$srcdir/$pkgname"
@@ -29,12 +41,14 @@ build() {
 package() {
     install -Dm755 "$srcdir/build/praefectus-native" "$pkgdir/usr/bin/praefectus-native"
     install -Dm755 "$srcdir/build/praefectus-native-worker" "$pkgdir/usr/bin/praefectus-native-worker"
-    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.desktop" \
+    install -Dm644 "$srcdir/praefectus-native.desktop" \
         "$pkgdir/usr/share/applications/praefectus-native.desktop"
-    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.svg" \
+    install -Dm644 "$srcdir/praefectus-native.svg" \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/praefectus-native.svg"
-    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.service" \
+    install -Dm644 "$srcdir/praefectus-native.service" \
         "$pkgdir/usr/lib/systemd/user/praefectus-native.service"
-    install -Dm644 "$srcdir/$pkgname/pkgbuild/praefectus-native.timer" \
+    install -Dm644 "$srcdir/praefectus-native.timer" \
         "$pkgdir/usr/lib/systemd/user/praefectus-native.timer"
+    install -Dm644 "$srcdir/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

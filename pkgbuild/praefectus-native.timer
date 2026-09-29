@@ -1,5 +1,5 @@
 [Unit]
-Description=Run Praefectus native backup scheduler
+Description=Run Praefectus Backup scheduler
 
 [Timer]
 OnCalendar=*-*-* *:*:00
