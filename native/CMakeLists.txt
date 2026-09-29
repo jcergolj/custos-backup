@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 QuickDialogs2 Test)
 
 qt_add_executable(custos
     src/main.cpp
@@ -56,6 +56,7 @@ target_link_libraries(custos-worker PRIVATE Qt6::Core)
 qt_add_qml_module(custos
     URI Custos
     VERSION 1.0
+    RESOURCE_PREFIX /qt/qml
     QML_FILES
         qml/Main.qml
 )
@@ -65,6 +66,7 @@ target_link_libraries(custos PRIVATE
     Qt6::Gui
     Qt6::Quick
     Qt6::QuickControls2
+    Qt6::QuickDialogs2
 )
 
 enable_testing()

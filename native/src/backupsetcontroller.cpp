@@ -6,7 +6,14 @@
 #include <QFileInfo>
 #include <QUuid>
 
+#include <algorithm>
+
 namespace {
+
+bool isRunActive(const QString &status)
+{
+    return status == QStringLiteral("running");
+}
 
 BackupSet newSet(int number)
 {
@@ -52,6 +59,15 @@ QStringList BackupSetController::setNames() const
     }
 
     return names;
+}
+
+QStringList BackupSetController::setIds() const
+{
+    QStringList ids;
+    for (const BackupSet &set : config.sets) {
+        ids.append(set.id);
+    }
+    return ids;
 }
 
 QString BackupSetController::currentId() const
@@ -271,6 +287,72 @@ QString BackupSetController::currentRunError() const
     return record == nullptr ? QString() : record->lastError;
 }
 
+QStringList BackupSetController::runningSetIds() const
+{
+    QStringList ids;
+    for (const BackupSet &set : config.sets) {
+        const BackupRunRecord *record = runStore.find(set.id);
+        if (record != nullptr && isRunActive(record->status)) {
+            ids.append(set.id);
+        }
+    }
+    return ids;
+}
+
+QStringList BackupSetController::recentBackups() const
+{
+    QStringList summaries;
+    for (const int index : recentBackupIndexes()) {
+        const BackupSet &set = config.sets.at(index);
+        const BackupRunRecord *record = runStore.find(set.id);
+        if (record == nullptr) {
+            summaries.append(QStringLiteral("%1\n%2").arg(set.name, QStringLiteral("No backup run yet")));
+            continue;
+        }
+
+        QString detail = record->status;
+        if (!record->lastError.isEmpty()) {
+            detail += QStringLiteral(" | %1").arg(record->lastError);
+        }
+        summaries.append(QStringLiteral("%1\n%2").arg(set.name, detail));
+    }
+
+    return summaries;
+}
+
+QStringList BackupSetController::recentBackupSetIds() const
+{
+    QStringList ids;
+    for (const int index : recentBackupIndexes()) {
+        ids.append(config.sets.at(index).id);
+    }
+    return ids;
+}
+
+QStringList BackupSetController::recentBackupTimestamps() const
+{
+    QStringList timestamps;
+    for (const int index : recentBackupIndexes()) {
+        const BackupRunRecord *record = runStore.find(config.sets.at(index).id);
+        if (record == nullptr) {
+            timestamps.append(QString());
+            continue;
+        }
+
+        QDateTime latest = record->lastSuccess;
+        if (record->lastFailure > latest) {
+            latest = record->lastFailure;
+        }
+        if (record->lastScheduled > latest) {
+            latest = record->lastScheduled;
+        }
+        timestamps.append(latest.isValid()
+            ? latest.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"))
+            : QString());
+    }
+    return timestamps;
+}
+
 void BackupSetController::setCurrentRequiredMounts(const QStringList &mounts)
 {
     if (BackupSet *set = currentSet()) {
@@ -328,23 +410,34 @@ void BackupSetController::addSet()
     emit setsChanged();
     emit currentIndexChanged();
     emit currentSetChanged();
+    emit dashboardChanged();
     clearPreview();
 }
 
 void BackupSetController::removeCurrentSet()
 {
-    if (selectedIndex < 0 || selectedIndex >= config.sets.size()) {
+    removeSet(selectedIndex);
+}
+
+void BackupSetController::removeSet(int index)
+{
+    if (index < 0 || index >= config.sets.size()) {
         return;
     }
 
-    config.sets.removeAt(selectedIndex);
+    config.sets.removeAt(index);
     if (config.sets.isEmpty()) {
         config.sets.append(newSet(1));
     }
-    selectedIndex = qMin(selectedIndex, config.sets.size() - 1);
+    if (selectedIndex > index) {
+        --selectedIndex;
+    } else if (selectedIndex == index) {
+        selectedIndex = qMin(selectedIndex, config.sets.size() - 1);
+    }
     emit setsChanged();
     emit currentIndexChanged();
     emit currentSetChanged();
+    emit dashboardChanged();
     clearPreview();
 }
 
@@ -419,6 +512,36 @@ const BackupSet *BackupSetController::currentSet() const
         : nullptr;
 }
 
+QVector<int> BackupSetController::recentBackupIndexes() const
+{
+    QVector<int> indexes;
+    indexes.reserve(config.sets.size());
+    for (int index = 0; index < config.sets.size(); ++index) {
+        indexes.append(index);
+    }
+
+    const auto latestActivity = [this](int index) {
+        const BackupRunRecord *record = runStore.find(config.sets.at(index).id);
+        if (record == nullptr) {
+            return QDateTime();
+        }
+
+        QDateTime latest = record->lastSuccess;
+        if (record->lastFailure > latest) {
+            latest = record->lastFailure;
+        }
+        if (record->lastScheduled > latest) {
+            latest = record->lastScheduled;
+        }
+        return latest;
+    };
+
+    std::stable_sort(indexes.begin(), indexes.end(), [&latestActivity](int left, int right) {
+        return latestActivity(left) > latestActivity(right);
+    });
+    return indexes;
+}
+
 void BackupSetController::clearPreview()
 {
     previewResult = {};
@@ -429,6 +552,7 @@ void BackupSetController::refreshRunState()
 {
     if (runStore.load()) {
         emit runStateChanged();
+        emit dashboardChanged();
     }
     if (cleanupStore.load()) {
         emit cleanupChanged();

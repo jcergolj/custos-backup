@@ -23,7 +23,8 @@ static bool validRemotePath(const QString &remotePath)
 static bool safeLocalPath(const QString &rootPath, const QString &remotePath)
 {
     const QString root = QFileInfo(rootPath).canonicalFilePath();
-    const QString destination = QFileInfo(QDir(rootPath).filePath(remotePath)).absoluteFilePath();
+    const QFileInfo destinationInfo(QDir(rootPath).filePath(remotePath));
+    const QString destination = destinationInfo.absoluteFilePath();
     const QString parent = QFileInfo(destination).absolutePath();
     if (root.isEmpty()) {
         return false;
@@ -31,7 +32,17 @@ static bool safeLocalPath(const QString &rootPath, const QString &remotePath)
     const QString canonicalParent = QFileInfo(parent).exists()
         ? QFileInfo(parent).canonicalFilePath()
         : QFileInfo(parent).absoluteFilePath();
-    return canonicalParent == root || canonicalParent.startsWith(root + QDir::separator());
+    if (canonicalParent != root && !canonicalParent.startsWith(root + QDir::separator())) {
+        return false;
+    }
+
+    if (destinationInfo.exists()) {
+        const QString canonicalDestination = destinationInfo.canonicalFilePath();
+        return canonicalDestination == root
+            || canonicalDestination.startsWith(root + QDir::separator());
+    }
+
+    return true;
 }
 
 static QString trashPath(const QString &rootPath, const QString &remotePath)

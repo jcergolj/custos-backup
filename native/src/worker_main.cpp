@@ -151,6 +151,12 @@ int main(int argc, char *argv[])
         }
 
         runStore.markRunning(record);
+        error.clear();
+        if (!runStore.save(&error)) {
+            qCritical().noquote() << error;
+
+            return 1;
+        }
         QString manifestPath;
         const QString computerName = QSysInfo::machineHostName();
         const QString copy = copyId();
