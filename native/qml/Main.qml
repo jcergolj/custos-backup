@@ -6,8 +6,10 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: root
     visible: true
-    width: 860
-    height: 760
+    width: 960
+    height: 640
+    minimumWidth: 760
+    minimumHeight: 480
     title: qsTr("Custos Backup")
     property var selectedRestoreIndexes: []
     property bool syncingCurrentSet: false
@@ -18,7 +20,7 @@ ApplicationWindow {
     property string systemFontFamily: Qt.application.font.family
     property string displayFontFamily: systemFontFamily
     property string bodyFontFamily: systemFontFamily
-    property int displayTypeSize: 34
+    property int displayTypeSize: 20
     property int pageTitleSize: 24
     property int sectionTitleSize: 16
     property int bodyTypeSize: 14
@@ -27,23 +29,38 @@ ApplicationWindow {
     property int readableMeasure: 680
     property int contentPadding: 24
     property int cardPadding: 12
-    property color accentColor: osPalette.window.hslLightness < 0.5 ? "#8AB4F8" : "#2457A6"
+    readonly property color inkColor: "#19232e"
+    readonly property color mutedColor: "#586575"
+    readonly property color lineColor: "#dce1e7"
+    readonly property color softColor: "#f0f3f6"
+    readonly property color accentColor: "#245bcb"
 
-    SystemPalette {
-        id: osPalette
-        colorGroup: SystemPalette.Active
+    font.family: bodyFontFamily
+    font.pixelSize: bodyTypeSize
+    color: "#ffffff"
+    palette {
+        window: "#ffffff"
+        windowText: root.inkColor
+        base: "#ffffff"
+        alternateBase: root.softColor
+        text: root.inkColor
+        button: "#ffffff"
+        buttonText: root.inkColor
+        brightText: "#ffffff"
+        highlight: root.accentColor
+        highlightedText: "#ffffff"
+        placeholderText: root.mutedColor
+        light: "#ffffff"
+        midlight: root.softColor
+        mid: root.lineColor
+        dark: "#aeb7c2"
+        shadow: root.lineColor
+        toolTipBase: root.softColor
+        toolTipText: root.inkColor
+        accent: root.accentColor
+        link: root.accentColor
+        linkVisited: root.accentColor
     }
-
-    palette.window: osPalette.window
-    palette.windowText: osPalette.windowText
-    palette.base: osPalette.base
-    palette.alternateBase: osPalette.alternateBase
-    palette.text: osPalette.text
-    palette.button: osPalette.button
-    palette.buttonText: osPalette.buttonText
-    palette.highlight: osPalette.highlight
-    palette.highlightedText: osPalette.highlightedText
-    palette.placeholderText: osPalette.placeholderText
 
     ListModel {
         id: sourceModel
@@ -156,12 +173,19 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        // Shared palette roles update every color group; apply disabled roles last.
+        palette.disabled.text = mutedColor
+        palette.disabled.windowText = mutedColor
+        palette.disabled.buttonText = mutedColor
+        palette.disabled.button = softColor
         showEditor = false
         loadCurrentSet()
     }
 
     Dialog {
         id: removeSetDialog
+        objectName: "removeSetDialog"
+        anchors.centerIn: parent
         property int setIndex: -1
         property string setName: ""
         title: qsTr("Remove backup")
@@ -202,7 +226,7 @@ ApplicationWindow {
             font.pixelSize: root.displayTypeSize
             font.weight: Font.Bold
             font.letterSpacing: 0.4
-            color: root.accentColor
+            color: root.inkColor
             Layout.leftMargin: root.contentPadding
             Layout.topMargin: 24
             Layout.bottomMargin: 16
@@ -225,101 +249,247 @@ ApplicationWindow {
                     anchors.rightMargin: root.contentPadding
                     spacing: 20
 
-                    RowLayout {
+                    Label {
+                        text: qsTr("Backups")
+                        font.pixelSize: root.pageTitleSize
+                        font.weight: Font.DemiBold
                         Layout.fillWidth: true
-
-                        Item { Layout.fillWidth: true }
-
-                        Button {
-                            text: qsTr("New backup")
-                            onClicked: root.createNewSet()
-                        }
+                        Layout.topMargin: 8
                     }
 
-                    GroupBox {
-                        title: qsTr("Backups")
-                        font.family: root.bodyFontFamily
-                        font.pixelSize: root.sectionTitleSize
-                        font.weight: Font.Bold
-                        padding: root.cardPadding
+                    RowLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.max(84, Math.min(260, dashboardSetsList.contentHeight + 56))
+                        Layout.preferredHeight: 56 + Math.max(180, Math.min(360,
+                            root.height - 280,
+                            Math.max(dashboardSetsList.contentHeight, recentBackupsList.contentHeight)))
+                        spacing: 32
 
                         ColumnLayout {
-                            anchors.fill: parent
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
+                            spacing: 16
 
-                            Label {
-                                text: qsTr("No backups yet. Choose New backup to get started.")
-                                visible: backupSetController.setNames.length === 0
-                                font.pixelSize: root.bodyTypeSize
-                                lineHeight: root.bodyLeading
-                                lineHeightMode: Text.ProportionalHeight
-                                wrapMode: Text.WordWrap
+                            RowLayout {
                                 Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+
+                                Label {
+                                    objectName: "backupSetsTitle"
+                                    text: qsTr("Backup sets")
+                                    font.pixelSize: root.sectionTitleSize
+                                    font.weight: Font.DemiBold
+                                    Layout.fillWidth: true
+                                }
+
+                                Button {
+                                    objectName: "newBackupSetButton"
+                                    text: qsTr("New backup set")
+                                    font.pixelSize: root.metadataTypeSize
+                                    Layout.preferredHeight: 36
+                                    onClicked: root.createNewSet()
+                                }
                             }
 
                             ListView {
                                 id: dashboardSetsList
+                                objectName: "dashboardSetsList"
                                 model: backupSetController.setNames
                                 clip: true
+                                spacing: 10
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                ScrollBar.vertical: ScrollBar {}
+
+                                Label {
+                                    objectName: "emptySetsLabel"
+                                    text: qsTr("No backups yet")
+                                    color: root.mutedColor
+                                    visible: dashboardSetsList.count === 0
+                                    width: parent.width
+                                    padding: 16
+                                }
 
                                 delegate: Frame {
+                                    id: setRow
                                     required property int index
                                     required property string modelData
+                                    readonly property bool runActive: backupSetController.runningSetIds.indexOf(backupSetController.setIds[index]) >= 0
                                     width: dashboardSetsList.width
-                                    implicitHeight: 64
+                                    implicitHeight: Math.max(80, setNameLabel.implicitHeight + 32)
+                                    padding: 16
+                                    background: Rectangle {
+                                        color: "#ffffff"
+                                        radius: 8
+                                        border.color: root.lineColor
+                                    }
 
                                     RowLayout {
                                         anchors.fill: parent
-                                        anchors.margins: root.cardPadding
+                                        spacing: 12
 
                                         Label {
-                                            text: modelData
-                                            font.family: root.bodyFontFamily
+                                            id: setNameLabel
+                                            text: setRow.modelData
                                             font.pixelSize: root.bodyTypeSize
-                                            font.weight: Font.Bold
-                                            color: root.accentColor
+                                            font.weight: Font.DemiBold
                                             elide: Text.ElideRight
                                             Layout.fillWidth: true
-                                            Layout.minimumWidth: 60
-                                        }
-
-                                        Button {
-                                            text: qsTr("Edit")
-                                            font.pixelSize: root.metadataTypeSize
-                                            Layout.preferredWidth: 52
-                                            onClicked: {
-                                                backupSetController.currentIndex = index
-                                                loadCurrentSet()
-                                                root.showAdvanced = false
-                                                root.showEditor = true
-                                            }
+                                            Layout.minimumWidth: 0
                                         }
 
                                         BusyIndicator {
-                                            running: backupSetController.runningSetIds.indexOf(backupSetController.setIds[index]) >= 0
+                                            objectName: "setBusy-" + setRow.index
+                                            running: setRow.runActive
                                             visible: running
                                             Layout.preferredWidth: 24
                                             Layout.preferredHeight: 24
                                         }
 
-                                        Button {
-                                            text: qsTr("Back up")
+                                        Label {
+                                            text: qsTr("Running")
+                                            visible: setRow.runActive
                                             font.pixelSize: root.metadataTypeSize
-                                            Layout.preferredWidth: 70
-                                            enabled: index < backupSetController.setIds.length
-                                            onClicked: backupLauncher.startBackup(backupSetController.setIds[index])
+                                            color: root.mutedColor
+                                        }
+
+                                        ToolButton {
+                                            id: overflowButton
+                                            objectName: "setActions-" + setRow.index
+                                            text: "⋯"
+                                            font.pixelSize: 24
+                                            Layout.preferredWidth: 40
+                                            Layout.preferredHeight: 40
+                                            Accessible.name: qsTr("Actions for %1").arg(setRow.modelData)
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: Accessible.name
+                                            onClicked: setActionsMenu.open()
+
+                                            Menu {
+                                                id: setActionsMenu
+                                                objectName: "setMenu-" + setRow.index
+                                                x: overflowButton.width - width
+                                                y: overflowButton.height
+
+                                                MenuItem {
+                                                    text: qsTr("Edit")
+                                                    onTriggered: {
+                                                        backupSetController.currentIndex = setRow.index
+                                                        root.loadCurrentSet()
+                                                        root.showAdvanced = false
+                                                        root.showEditor = true
+                                                    }
+                                                }
+
+                                                MenuItem {
+                                                    text: qsTr("Back up now")
+                                                    enabled: setRow.index < backupSetController.setIds.length && !setRow.runActive
+                                                    onTriggered: backupLauncher.startBackup(backupSetController.setIds[setRow.index])
+                                                }
+
+                                                MenuSeparator {}
+
+                                                MenuItem {
+                                                    text: qsTr("Delete")
+                                                    onTriggered: root.requestRemoveSet(setRow.index)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
+                            spacing: 16
+
+                            Label {
+                                objectName: "recentBackupsTitle"
+                                text: qsTr("Recent backups")
+                                font.pixelSize: root.sectionTitleSize
+                                font.weight: Font.DemiBold
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            ListView {
+                                id: recentBackupsList
+                                objectName: "recentBackupsList"
+                                model: backupSetController.recentBackups
+                                implicitWidth: 0
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                spacing: 10
+                                ScrollBar.vertical: ScrollBar {}
+
+                                Label {
+                                    objectName: "emptyRecentLabel"
+                                    text: qsTr("No backups yet")
+                                    color: root.mutedColor
+                                    visible: recentBackupsList.count === 0
+                                    width: parent.width
+                                    padding: 16
+                                }
+
+                                delegate: Frame {
+                                    id: recentRow
+                                    required property int index
+                                    required property string modelData
+                                    readonly property string timestamp: backupSetController.recentBackupTimestamps[index] || ""
+                                    width: recentBackupsList.width
+                                    implicitHeight: Math.max(96, recentSummary.implicitHeight + 32)
+                                    padding: 16
+                                    background: Rectangle {
+                                        color: root.softColor
+                                        radius: 8
+                                    }
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        spacing: 12
+
+                                        ColumnLayout {
+                                            id: recentSummary
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
+                                            Layout.alignment: Qt.AlignTop
+                                            spacing: 4
+
+                                            Label {
+                                                objectName: "recentSummary-" + recentRow.index
+                                                text: recentRow.modelData
+                                                wrapMode: Text.Wrap
+                                                lineHeight: root.bodyLeading
+                                                lineHeightMode: Text.ProportionalHeight
+                                                font.pixelSize: root.bodyTypeSize
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Label {
+                                                text: qsTr("Last activity: %1").arg(recentRow.timestamp)
+                                                visible: recentRow.timestamp.length > 0
+                                                color: root.mutedColor
+                                                font.pixelSize: root.metadataTypeSize
+                                                wrapMode: Text.Wrap
+                                                Layout.fillWidth: true
+                                            }
                                         }
 
                                         Button {
-                                            text: qsTr("Remove")
-                                            font.pixelSize: root.metadataTypeSize
-                                            Layout.preferredWidth: 88
-                                            ToolTip.visible: hovered
-                                            ToolTip.text: qsTr("Remove this backup")
-                                            onClicked: root.requestRemoveSet(index)
+                                            objectName: "restore-" + recentRow.index
+                                            text: qsTr("Restore")
+                                            Layout.preferredHeight: 36
+                                            Layout.alignment: Qt.AlignTop
+                                            enabled: recentRow.timestamp.length > 0
+                                                && backupSetController.setIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) >= 0
+                                            onClicked: root.restoreRecentBackup(recentRow.index)
                                         }
                                     }
                                 }
@@ -327,69 +497,19 @@ ApplicationWindow {
                         }
                     }
 
-                    GroupBox {
-                        title: qsTr("Recent activity")
-                        font.family: root.bodyFontFamily
-                        font.pixelSize: root.sectionTitleSize
-                        font.weight: Font.Bold
-                        padding: root.cardPadding
-                        width: parent.width
+                    Label {
+                        id: dashboardStatusLabel
+                        objectName: "dashboardStatusLabel"
+                        visible: text.length > 0
+                        font.pixelSize: root.bodyTypeSize
+                        lineHeight: root.bodyLeading
+                        lineHeightMode: Text.ProportionalHeight
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.max(110, Math.min(420, recentBackupsList.contentHeight + 64))
-
-                        ColumnLayout {
-                            anchors.fill: parent
-
-                            Label {
-                                text: qsTr("No activity yet. Create a backup and choose Back up to make the first copy.")
-                                font.pixelSize: root.bodyTypeSize
-                                lineHeight: root.bodyLeading
-                                lineHeightMode: Text.ProportionalHeight
-                                visible: backupSetController.recentBackups.length === 0
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-
-                            ListView {
-                                id: recentBackupsList
-                                model: backupSetController.recentBackups
-                                visible: backupSetController.recentBackups.length > 0
-                                implicitWidth: 0
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                clip: true
-
-                                delegate: Frame {
-                                    required property int index
-                                required property string modelData
-                                width: recentBackupsList.width
-                                implicitHeight: 76
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: root.cardPadding
-
-                                    Label {
-                                        id: summaryLabel
-                                        text: modelData
-                                            + (backupSetController.recentBackupTimestamps[index].length > 0
-                                                ? qsTr("\nLast activity: %1").arg(backupSetController.recentBackupTimestamps[index])
-                                                : "")
-                                        wrapMode: Text.WordWrap
-                                        lineHeight: root.bodyLeading
-                                        lineHeightMode: Text.ProportionalHeight
-                                        font.pixelSize: root.bodyTypeSize
-                                        Layout.fillWidth: true
-                                    }
-
-                                        Button {
-                                            text: qsTr("Restore")
-                                            enabled: backupSetController.recentBackupTimestamps[index].length > 0
-                                            onClicked: root.restoreRecentBackup(index)
-                                        }
-                                    }
-                                }
-                            }
+                        wrapMode: Text.Wrap
+                        padding: 12
+                        background: Rectangle {
+                            color: root.softColor
+                            radius: 6
                         }
                     }
 
@@ -519,25 +639,9 @@ ApplicationWindow {
                                 }
                             }
 
-                            Label {
-                                id: dashboardStatusLabel
-                                font.pixelSize: root.metadataTypeSize
-                                lineHeight: root.bodyLeading
-                                lineHeightMode: Text.ProportionalHeight
-                                Layout.fillWidth: true
-                                wrapMode: Text.WordWrap
-                            }
                         }
                     }
 
-                    Label {
-                        text: qsTr("Choose Edit to change a backup's files, exclusions, or schedule.")
-                        font.pixelSize: root.metadataTypeSize
-                        lineHeight: root.bodyLeading
-                        lineHeightMode: Text.ProportionalHeight
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
                 }
             }
 
@@ -583,6 +687,7 @@ ApplicationWindow {
 
             TextField {
                 id: setNameField
+                objectName: "setNameField"
                 placeholderText: qsTr("Example: Documents")
                 Layout.fillWidth: true
             }

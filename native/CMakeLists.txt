@@ -71,6 +71,16 @@ target_link_libraries(custos PRIVATE
 
 enable_testing()
 
+find_package(Qt6 REQUIRED COMPONENTS QuickTest)
+qt_add_executable(dashboard-test tests/dashboard_test.cpp)
+target_link_libraries(dashboard-test PRIVATE Qt6::QuickTest Qt6::QuickControls2 Qt6::QuickDialogs2)
+target_compile_definitions(dashboard-test PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+add_test(NAME dashboard-test COMMAND dashboard-test)
+set_tests_properties(dashboard-test PROPERTIES
+    TIMEOUT 30
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Fusion;QT_QPA_PLATFORMTHEME=;QT_FORCE_STDERR_LOGGING=1"
+)
+
 qt_add_executable(backupengine-test
     tests/backupengine_test.cpp
     src/backupengine.cpp
