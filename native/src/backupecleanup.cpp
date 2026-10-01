@@ -220,7 +220,7 @@ bool BackupCleanup::apply(BackupProvider &provider, CleanupStore &store, const Q
             continue;
         }
         if (!allowedRoot.isEmpty() && !inside(target, allowedRoot)) {
-            state.lastError = QStringLiteral("The cleanup target is outside the configured backup set.");
+            state.lastError = QStringLiteral("The cleanup target is outside the configured backup.");
             if (error != nullptr) {
                 *error = state.lastError;
             }

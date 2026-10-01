@@ -63,7 +63,7 @@ void BackupLauncher::startBackup(const QString &setId)
         return candidate.id == setId;
     });
     if (set == config.sets.cend()) {
-        emit failed(QStringLiteral("The selected backup set no longer exists."));
+        emit failed(QStringLiteral("The selected backup no longer exists."));
         return;
     }
     const QString runPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup-runs.json"));
@@ -74,7 +74,7 @@ void BackupLauncher::startBackup(const QString &setId)
     }
     BackupRunStore runs(runPath);
     if (!runs.load(&error) || !runs.enqueue(setId, QStringLiteral("manual"), QDateTime::currentDateTime())) {
-        emit failed(error.isEmpty() ? QStringLiteral("The selected backup set is already queued.") : error);
+        emit failed(error.isEmpty() ? QStringLiteral("The selected backup is already queued.") : error);
         return;
     }
     if (!runs.save(&error)) {

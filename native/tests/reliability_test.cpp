@@ -9,17 +9,8 @@ class FakePrerequisiteProbe final : public BackupPrerequisiteProbe
 {
 public:
     bool ac = true;
-    bool volume = true;
 
     bool onAcPower() const override { return ac; }
-
-    bool volumeReady(const RequiredVolume &, QString *reason) const override
-    {
-        if (!volume && reason != nullptr) {
-            *reason = QStringLiteral("volume missing");
-        }
-        return volume;
-    }
 };
 
 class ReliabilityTest final : public QObject
@@ -29,7 +20,7 @@ class ReliabilityTest final : public QObject
 private slots:
     void monthlySchedulesUseTheLastDay();
     void runStoreCoalescesAndPersistsRetries();
-    void prerequisitesGatePowerAndVolumes();
+    void prerequisitesGateAcPowerOnlyWhenRequired();
 };
 
 void ReliabilityTest::monthlySchedulesUseTheLastDay()
@@ -75,11 +66,10 @@ void ReliabilityTest::runStoreCoalescesAndPersistsRetries()
     QCOMPARE(restoredRecord->nextAttempt, now.addSecs(5));
 }
 
-void ReliabilityTest::prerequisitesGatePowerAndVolumes()
+void ReliabilityTest::prerequisitesGateAcPowerOnlyWhenRequired()
 {
     BackupSet set;
     set.onlyOnAcPower = true;
-    set.requiredVolumes.append({QStringLiteral("/run/media/backup"), QByteArray("device")});
     FakePrerequisiteProbe probe;
 
     probe.ac = false;
@@ -88,12 +78,10 @@ void ReliabilityTest::prerequisitesGatePowerAndVolumes()
     QCOMPARE(result.reason, QStringLiteral("Waiting for AC power."));
 
     probe.ac = true;
-    probe.volume = false;
-    result = BackupPrerequisites::check(set, probe);
-    QVERIFY(!result.ready);
-    QCOMPARE(result.reason, QStringLiteral("volume missing"));
+    QVERIFY(BackupPrerequisites::check(set, probe).ready);
 
-    probe.volume = true;
+    probe.ac = false;
+    set.onlyOnAcPower = false;
     QVERIFY(BackupPrerequisites::check(set, probe).ready);
 }
 

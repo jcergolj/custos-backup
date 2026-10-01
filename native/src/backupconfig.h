@@ -1,16 +1,10 @@
 #pragma once
 
-#include <QByteArray>
 #include <QString>
 #include <QStringList>
 #include <QVector>
 
 #include "backupschedule.h"
-
-struct RequiredVolume {
-    QString mountPath;
-    QByteArray deviceId;
-};
 
 struct BackupSet {
     QString id;
@@ -21,7 +15,6 @@ struct BackupSet {
     BackupSchedule schedule;
     int retention = 3;
     bool onlyOnAcPower = false;
-    QVector<RequiredVolume> requiredVolumes;
 };
 
 struct BackupConfig {

@@ -24,15 +24,6 @@ bool validSchedule(const BackupSchedule &schedule)
         && schedule.dayOfMonth >= 1 && schedule.dayOfMonth <= 31;
 }
 
-bool validHex(const QString &value)
-{
-    return value.size() % 2 == 0 && std::all_of(value.cbegin(), value.cend(), [](const QChar character) {
-        const QChar lower = character.toLower();
-        return (character >= QChar('0') && character <= QChar('9'))
-            || (lower >= QChar('a') && lower <= QChar('f'));
-    });
-}
-
 }
 
 BackupConfigStore::BackupConfigStore(QString path)
@@ -92,7 +83,7 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
         for (const QJsonValue &setValue : setsValue.toArray()) {
             if (!setValue.isObject()) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("The Custos backup configuration contains an invalid set.");
+                    *error = QStringLiteral("The Custos backup configuration contains an invalid backup.");
                 }
 
                 return false;
@@ -122,20 +113,6 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
             set.schedule.dayOfMonth = schedule.value(QStringLiteral("day_of_month")).toInt(1);
             set.retention = qMax(1, setObject.value(QStringLiteral("retention")).toInt(3));
             set.onlyOnAcPower = setObject.value(QStringLiteral("only_on_ac_power")).toBool(false);
-            for (const QJsonValue &volumeValue : setObject.value(QStringLiteral("required_volumes")).toArray()) {
-                const QJsonObject volume = volumeValue.toObject();
-                const QString deviceId = volume.value(QStringLiteral("device_id")).toString();
-                if (!volumeValue.isObject() || !validHex(deviceId)) {
-                    if (error != nullptr) {
-                        *error = QStringLiteral("The Custos backup configuration is malformed.");
-                    }
-                    return false;
-                }
-                set.requiredVolumes.append({
-                    volume.value(QStringLiteral("mount_path")).toString(),
-                    QByteArray::fromHex(deviceId.toLatin1()),
-                });
-            }
 
             if (set.id.trimmed().isEmpty() || set.name.trimmed().isEmpty() || set.remoteRoot.trimmed().isEmpty()
                 || set.sourceDirectories.isEmpty()
@@ -143,9 +120,6 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
                 || setIds.contains(set.id)
                 || std::any_of(set.sourceDirectories.cbegin(), set.sourceDirectories.cend(), [](const QString &source) {
                     return source.trimmed().isEmpty();
-                })
-                || std::any_of(set.requiredVolumes.cbegin(), set.requiredVolumes.cend(), [](const RequiredVolume &volume) {
-                    return volume.mountPath.trimmed().isEmpty();
                 })) {
                 if (error != nullptr) {
                     *error = QStringLiteral("The Custos backup configuration is incomplete.");
@@ -236,21 +210,6 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
                 exclusions.append(exclusion);
             }
 
-            QJsonArray volumes;
-            for (const RequiredVolume &volume : set.requiredVolumes) {
-                if (volume.mountPath.trimmed().isEmpty()) {
-                    if (error != nullptr) {
-                        *error = QStringLiteral("The Custos backup configuration is incomplete.");
-                    }
-
-                    return false;
-                }
-                volumes.append(QJsonObject {
-                    {QStringLiteral("mount_path"), volume.mountPath},
-                    {QStringLiteral("device_id"), QString::fromLatin1(volume.deviceId.toHex())},
-                });
-            }
-
             const QJsonObject schedule {
                 {QStringLiteral("frequency"), set.schedule.frequency},
                 {QStringLiteral("hour"), set.schedule.hour},
@@ -268,7 +227,6 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
                 {QStringLiteral("schedule"), schedule},
                 {QStringLiteral("retention"), qMax(1, set.retention)},
                 {QStringLiteral("only_on_ac_power"), set.onlyOnAcPower},
-                {QStringLiteral("required_volumes"), volumes},
             });
         }
         object.insert(QStringLiteral("sets"), sets);

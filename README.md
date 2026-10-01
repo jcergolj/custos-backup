@@ -48,15 +48,21 @@ Custos never asks for or stores your Proton password.
 
 ### 3. Create and run a backup
 
-1. Open **Custos Backup** and create a backup set.
-2. Enter one source file or folder per line. Hidden paths such as `~/.config` are valid.
-3. Add exclusions if needed and press **Preview**.
-4. Review included, excluded, skipped, and missing paths.
-5. Set a remote root, for example `/my-files/backups`, and save the set.
-6. Press **Back up** for the first run.
+1. Open **Custos Backup** and choose **New backup**.
+2. Give it a name, such as **Documents**.
+3. Use **+** to select files or folders. Hidden paths such as `~/.config` are valid.
+4. Choose any files or folders to exclude with **+** under **Exclusions**, or enter
+   their paths, one per line.
+5. Choose a schedule, or leave scheduling disabled for manual backups.
+6. Press **Save**, then **Back up** to make the first copy. **Preview** lets you
+   review included, excluded, skipped, and missing paths before running.
 
-Each backup set has its own sources, exclusions, schedule, retention value, and
-optional external-drive or AC-power requirements.
+Each named backup has its own files, exclusions, and schedule. Every run creates
+a separate copy. By default, copies are stored under `/my-files/backups` in Proton
+Drive, and the latest three verified successful copies are kept.
+
+**Advanced settings** lets you change the remote folder and number of copies to
+keep, or run only on AC power.
 
 Schedules can be daily, weekly, or monthly. If a monthly day does not exist in
 the current month, the last day of that month is used.
@@ -64,7 +70,7 @@ the current month, the last day of that month is used.
 ### 4. Enable scheduling
 
 Scheduling is not enabled during installation. First save at least one backup
-set and confirm that Proton Drive authentication works:
+and confirm that Proton Drive authentication works:
 
 ```bash
 systemctl --user daemon-reload
@@ -81,8 +87,8 @@ To restore after reinstalling or moving to another computer:
 
 1. Install Custos Backup and authenticate `proton-drive`.
 2. Open the app and enter the old remote root.
-3. Press **Discover remote backups**. Do not recreate a local set first.
-4. Select the computer, set, and verified files to restore.
+3. Press **Discover remote backups**. Do not recreate a local backup first.
+4. Select the computer, backup copy, and verified files to restore.
 5. Choose a separate destination folder and start the restore.
 
 Incomplete copies expose only verified entries. Missing, failed, malformed, or
@@ -116,9 +122,8 @@ command -v proton-drive
 proton-drive filesystem info /my-files
 ```
 
-An external-drive or AC-power requirement makes a set wait instead of creating
-a misleading partial backup. Missing or unreadable source paths are reported
-in the preview and manifest.
+An AC-power requirement makes a backup wait while on battery power. Missing or
+unreadable source paths are reported in the preview and manifest.
 
 ## Uninstall
 

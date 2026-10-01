@@ -13,8 +13,8 @@ custos-backup-runs.json
 custos-backup-cleanup.json
 ```
 
-The first file contains configured backup sets. Run history and pending cleanup
-decisions are stored separately. Discovered remote backups are not written into
+The first file contains named backup configurations. Run history and pending
+cleanup decisions are stored separately. Discovered remote backups are not written into
 the local schedule or backup queue, so reinstall discovery never reactivates an
 old schedule.
 
@@ -23,12 +23,21 @@ old schedule.
 Each copy is stored independently below:
 
 ```text
-<remote-root>/<computer>/<set>/<copy-id>/
+<remote-root>/<computer>/<backup-name>/<copy-id>/
 ```
 
-Every copy has a manifest containing its computer, set, copy, timestamp,
-completion state, expected items, failed items, paths, sizes, and checksums.
-This provenance keeps similarly named sets on different computers distinct.
+Every copy has a manifest containing its computer, backup identity and name,
+copy, timestamp, completion state, expected items, failed items, paths, sizes,
+and checksums.
+This provenance keeps similarly named backups on different computers distinct.
+
+The interface calls each saved configuration a **backup** and each run's output
+a **copy**. Internal `BackupSet` types and persisted `sets`, `set_id`, and
+`set_name` fields retain their existing names for compatibility with saved
+configurations, run history, cleanup decisions, and remote manifests.
+
+Legacy `required_volumes` settings are ignored on load and omitted on save;
+backups no longer wait for external drives to be mounted.
 
 ## Provider Behavior
 
@@ -46,8 +55,8 @@ field is used when the CLI exposes one.
 ## Retention And Cleanup
 
 Retention considers only positively identified Custos copies for the
-correct computer and set. Successful verified copies are retained according to
-the set limit. Failed or incomplete copies cannot cause an older successful
+correct computer and backup. Successful verified copies are retained according to
+the backup's limit. Failed or incomplete copies cannot cause an older successful
 copy to be removed.
 
 Before the first cleanup, the exact remote paths are persisted as a proposal and
@@ -72,7 +81,7 @@ The package installs these user units:
 
 The worker runs at low priority with idle I/O scheduling and a 10% CPU quota.
 The timer is intentionally not enabled by the package install hook because the
-CLI must be authenticated and a backup set must exist first.
+CLI must be authenticated and a backup must exist first.
 
 The display name is **Custos Backup**. The technical package, executable, unit,
 and configuration names are `custos-git`, `custos`, and `custos.*`.

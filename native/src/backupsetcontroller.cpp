@@ -1,7 +1,5 @@
 #include "backupsetcontroller.h"
 
-#include "backupprerequisites.h"
-
 #include <QDir>
 #include <QFileInfo>
 #include <QUuid>
@@ -19,8 +17,8 @@ BackupSet newSet(int number)
 {
     return {
         QUuid::createUuid().toString(QUuid::WithoutBraces),
-        QStringLiteral("Backup set %1").arg(number),
-        QStringLiteral("/my-files/backups/set-%1").arg(number),
+        QStringLiteral("Backup %1").arg(number),
+        QStringLiteral("/my-files/backups"),
         {},
         {},
     };
@@ -41,13 +39,12 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
     cleanupStore.load();
     QString error;
     if (store.load(&config, &error)) {
-        selectedIndex = 0;
+        selectedIndex = config.sets.isEmpty() ? -1 : 0;
     } else if (QFileInfo::exists(store.filePath())) {
         emit failed(error);
     } else {
         config.protonBinary = qEnvironmentVariable("CUSTOS_PROTON_BIN", QStringLiteral("proton-drive"));
-        config.sets.append(newSet(1));
-        selectedIndex = 0;
+        selectedIndex = -1;
     }
 }
 
@@ -249,19 +246,6 @@ void BackupSetController::setCurrentOnlyOnAcPower(bool enabled)
     }
 }
 
-QStringList BackupSetController::currentRequiredMounts() const
-{
-    QStringList mounts;
-    const BackupSet *set = currentSet();
-    if (set == nullptr) {
-        return mounts;
-    }
-    for (const RequiredVolume &volume : set->requiredVolumes) {
-        mounts.append(volume.mountPath);
-    }
-    return mounts;
-}
-
 QString BackupSetController::currentNextRun() const
 {
     const BackupSet *set = currentSet();
@@ -353,20 +337,6 @@ QStringList BackupSetController::recentBackupTimestamps() const
     return timestamps;
 }
 
-void BackupSetController::setCurrentRequiredMounts(const QStringList &mounts)
-{
-    if (BackupSet *set = currentSet()) {
-        set->requiredVolumes.clear();
-        for (const QString &mount : mounts) {
-            const RequiredVolume volume = BackupPrerequisites::captureVolume(mount);
-            set->requiredVolumes.append({mount, volume.mountPath == QDir::cleanPath(QFileInfo(mount).absoluteFilePath())
-                ? volume.deviceId
-                : QByteArray()});
-        }
-        emit currentSetChanged();
-    }
-}
-
 QStringList BackupSetController::previewIncluded() const
 {
     return previewResult.includedFiles;
@@ -451,7 +421,7 @@ void BackupSetController::preview()
     const BackupSet *set = currentSet();
     if (set == nullptr) {
         clearPreview();
-        emit failed(QStringLiteral("A backup set must be selected."));
+        emit failed(QStringLiteral("A backup must be selected."));
 
         return;
     }
@@ -470,7 +440,7 @@ bool BackupSetController::save()
     const BackupSet *set = currentSet();
     if (set == nullptr || set->name.trimmed().isEmpty() || set->remoteRoot.trimmed().isEmpty()
         || set->sourceDirectories.isEmpty()) {
-        emit failed(QStringLiteral("The selected backup set is incomplete."));
+        emit failed(QStringLiteral("Enter a backup name, choose at least one source, and check the destination in Advanced settings."));
 
         return false;
     }
@@ -482,7 +452,7 @@ bool BackupSetController::save()
         return false;
     }
 
-    emit statusChanged(QStringLiteral("Backup sets saved."));
+    emit statusChanged(QStringLiteral("Backup saved."));
     return true;
 }
 

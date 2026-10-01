@@ -1,4 +1,7 @@
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -12,6 +15,7 @@ private slots:
     void savesAndLoadsConfiguration();
     void savesAndLoadsIndependentSets();
     void savesAndLoadsEmptySetList();
+    void ignoresAndDropsLegacyExternalDriveRequirements();
     void rejectsMalformedConfiguration();
     void rejectsIncompleteConfiguration();
     void rejectsDuplicateSetIdsAndInvalidSchedules();
@@ -63,7 +67,6 @@ void BackupConfigTest::savesAndLoadsIndependentSets()
     expected.sets[0].schedule = {QStringLiteral("monthly"), 8, 45, 2, 31};
     expected.sets[0].retention = 5;
     expected.sets[0].onlyOnAcPower = true;
-    expected.sets[0].requiredVolumes = {{QStringLiteral("/run/media/backup"), QByteArray("device")}};
 
     QVERIFY(store.save(expected));
     BackupConfig actual;
@@ -77,7 +80,6 @@ void BackupConfigTest::savesAndLoadsIndependentSets()
     QCOMPARE(actual.sets.at(0).schedule.hour, 8);
     QCOMPARE(actual.sets.at(0).retention, 5);
     QCOMPARE(actual.sets.at(0).onlyOnAcPower, true);
-    QCOMPARE(actual.sets.at(0).requiredVolumes.first().deviceId, QByteArray("device"));
     QCOMPARE(actual.sets.at(1).remoteRoot, QStringLiteral("backups/configs"));
 }
 
@@ -94,6 +96,40 @@ void BackupConfigTest::savesAndLoadsEmptySetList()
     QVERIFY(store.load(&actual));
     QCOMPARE(actual.protonBinary, expected.protonBinary);
     QVERIFY(actual.sets.isEmpty());
+}
+
+void BackupConfigTest::ignoresAndDropsLegacyExternalDriveRequirements()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("settings.json"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({"proton_binary":"proton-drive","sets":[{
+        "id":"documents","name":"Documents","remote_root":"/my-files/backups",
+        "source_directories":["/home/user/Documents"],"exclusions":["/home/user/Documents/cache"],
+        "schedule":{"frequency":"daily","hour":9,"minute":30},"only_on_ac_power":true,
+        "required_volumes":[{"mount_path":"/run/media/missing-drive","device_id":"646576696365"}]
+    }]})");
+    file.close();
+
+    BackupConfigStore store(path);
+    BackupConfig config;
+    QVERIFY(store.load(&config));
+    QCOMPARE(config.sets.size(), 1);
+    QCOMPARE(config.sets.first().id, QStringLiteral("documents"));
+    QCOMPARE(config.sets.first().name, QStringLiteral("Documents"));
+    QCOMPARE(config.sets.first().exclusions, QStringList {QStringLiteral("/home/user/Documents/cache")});
+    QCOMPARE(config.sets.first().schedule.frequency, QStringLiteral("daily"));
+    QCOMPARE(config.sets.first().schedule.hour, 9);
+    QCOMPARE(config.sets.first().schedule.minute, 30);
+    QVERIFY(config.sets.first().onlyOnAcPower);
+
+    QVERIFY(store.save(config));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonObject backup = QJsonDocument::fromJson(file.readAll()).object()
+        .value(QStringLiteral("sets")).toArray().first().toObject();
+    QVERIFY(!backup.contains(QStringLiteral("required_volumes")));
 }
 
 void BackupConfigTest::rejectsMalformedConfiguration()

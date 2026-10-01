@@ -13,6 +13,7 @@ ApplicationWindow {
     property bool syncingCurrentSet: false
     property bool showEditor: false
     property bool showRestore: false
+    property bool showAdvanced: false
     property bool backupRunning: backupSetController.currentRunStatus === "running"
     property string systemFontFamily: Qt.application.font.family
     property string displayFontFamily: systemFontFamily
@@ -71,7 +72,6 @@ ApplicationWindow {
         scheduleDay.value = backupSetController.currentScheduleDayOfMonth
         retentionSpin.value = backupSetController.currentRetention
         acPowerCheck.checked = backupSetController.currentOnlyOnAcPower
-        requiredMountsField.text = backupSetController.currentRequiredMounts.join("\n")
     }
 
     function localPath(url) {
@@ -91,9 +91,18 @@ ApplicationWindow {
 
     function createNewSet() {
         backupSetController.addSet()
-        setSelector.currentIndex = backupSetController.currentIndex
         loadCurrentSet()
+        showAdvanced = false
         showEditor = true
+    }
+
+    function addExclusion(url) {
+        const path = localPath(url)
+        const exclusions = lines(exclusionsField.text)
+        if (path.length > 0 && exclusions.indexOf(path) < 0) {
+            exclusions.push(path)
+            exclusionsField.text = exclusions.join("\n")
+        }
     }
 
     function restoreRecentBackup(index) {
@@ -136,7 +145,6 @@ ApplicationWindow {
             backupSetController.currentScheduleDayOfMonth = scheduleDay.value
             backupSetController.currentRetention = retentionSpin.value
             backupSetController.currentOnlyOnAcPower = acPowerCheck.checked
-            backupSetController.currentRequiredMounts = lines(requiredMountsField.text)
         } finally {
             syncingCurrentSet = false
         }
@@ -156,17 +164,17 @@ ApplicationWindow {
         id: removeSetDialog
         property int setIndex: -1
         property string setName: ""
-        title: qsTr("Remove backup set")
+        title: qsTr("Remove backup")
+        width: Math.min(root.width - 2 * root.contentPadding, 420)
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         contentItem: Label {
-            text: qsTr("Remove \"%1\" from Custos? Existing remote backups will not be deleted.").arg(removeSetDialog.setName)
+            text: qsTr("Remove \"%1\" from Custos? Existing remote copies will not be deleted.").arg(removeSetDialog.setName)
             font.pixelSize: root.bodyTypeSize
             lineHeight: root.bodyLeading
             lineHeightMode: Text.ProportionalHeight
             wrapMode: Text.WordWrap
-            Layout.preferredWidth: 360
             padding: 16
         }
 
@@ -223,13 +231,13 @@ ApplicationWindow {
                         Item { Layout.fillWidth: true }
 
                         Button {
-                            text: qsTr("New backup set")
+                            text: qsTr("New backup")
                             onClicked: root.createNewSet()
                         }
                     }
 
                     GroupBox {
-                        title: qsTr("Backup sets")
+                        title: qsTr("Backups")
                         font.family: root.bodyFontFamily
                         font.pixelSize: root.sectionTitleSize
                         font.weight: Font.Bold
@@ -241,7 +249,7 @@ ApplicationWindow {
                             anchors.fill: parent
 
                             Label {
-                                text: qsTr("No backup sets yet. Create one to get started.")
+                                text: qsTr("No backups yet. Choose New backup to get started.")
                                 visible: backupSetController.setNames.length === 0
                                 font.pixelSize: root.bodyTypeSize
                                 lineHeight: root.bodyLeading
@@ -285,6 +293,7 @@ ApplicationWindow {
                                             onClicked: {
                                                 backupSetController.currentIndex = index
                                                 loadCurrentSet()
+                                                root.showAdvanced = false
                                                 root.showEditor = true
                                             }
                                         }
@@ -305,11 +314,11 @@ ApplicationWindow {
                                         }
 
                                         Button {
-                                            text: qsTr("Remove set")
+                                            text: qsTr("Remove")
                                             font.pixelSize: root.metadataTypeSize
                                             Layout.preferredWidth: 88
                                             ToolTip.visible: hovered
-                                            ToolTip.text: qsTr("Remove this backup set")
+                                            ToolTip.text: qsTr("Remove this backup")
                                             onClicked: root.requestRemoveSet(index)
                                         }
                                     }
@@ -319,7 +328,7 @@ ApplicationWindow {
                     }
 
                     GroupBox {
-                        title: qsTr("Recent backups")
+                        title: qsTr("Recent activity")
                         font.family: root.bodyFontFamily
                         font.pixelSize: root.sectionTitleSize
                         font.weight: Font.Bold
@@ -332,7 +341,7 @@ ApplicationWindow {
                             anchors.fill: parent
 
                             Label {
-                                text: qsTr("No backup runs yet. Create a set and run a preview to get started.")
+                                text: qsTr("No activity yet. Create a backup and choose Back up to make the first copy.")
                                 font.pixelSize: root.bodyTypeSize
                                 lineHeight: root.bodyLeading
                                 lineHeightMode: Text.ProportionalHeight
@@ -409,7 +418,7 @@ ApplicationWindow {
                             }
 
                             TextField {
-                                placeholderText: qsTr("Search computer, set, copy, or status")
+                                placeholderText: qsTr("Search computer, backup name, copy, or status")
                                 text: restoreController.copySearch
                                 onTextChanged: restoreController.copySearch = text
                                 Layout.fillWidth: true
@@ -522,7 +531,7 @@ ApplicationWindow {
                     }
 
                     Label {
-                        text: qsTr("Select a backup set above to edit sources, scheduling, and retention.")
+                        text: qsTr("Choose Edit to change a backup's files, exclusions, or schedule.")
                         font.pixelSize: root.metadataTypeSize
                         lineHeight: root.bodyLeading
                         lineHeightMode: Text.ProportionalHeight
@@ -556,7 +565,7 @@ ApplicationWindow {
                     }
 
                     Label {
-                        text: qsTr("Create independent sets with multiple sources and exclusions. Preview before saving or running a set.")
+                        text: qsTr("Give your backup a name, choose what to include or exclude, and set its schedule.")
                         font.pixelSize: root.bodyTypeSize
                         lineHeight: root.bodyLeading
                         lineHeightMode: Text.ProportionalHeight
@@ -565,35 +574,16 @@ ApplicationWindow {
                         Layout.maximumWidth: root.readableMeasure
                     }
 
-            RowLayout {
-                Layout.fillWidth: true
-
-                ComboBox {
-                    id: setSelector
-                    model: backupSetController.setNames
-                    currentIndex: backupSetController.currentIndex
-                    Layout.fillWidth: true
-                    onCurrentIndexChanged: {
-                        if (currentIndex >= 0 && currentIndex !== backupSetController.currentIndex) {
-                            backupSetController.currentIndex = currentIndex
-                            loadCurrentSet()
-                        }
-                    }
-                }
-
-                Button {
-                    text: qsTr("Remove")
-                    onClicked: {
-                        backupSetController.removeCurrentSet()
-                        setSelector.currentIndex = backupSetController.currentIndex
-                        loadCurrentSet()
-                    }
-                }
+            Label {
+                text: qsTr("Name")
+                font.pixelSize: root.sectionTitleSize
+                font.weight: Font.DemiBold
+                color: root.accentColor
             }
 
             TextField {
                 id: setNameField
-                placeholderText: qsTr("Set name")
+                placeholderText: qsTr("Example: Documents")
                 Layout.fillWidth: true
             }
 
@@ -696,54 +686,59 @@ ApplicationWindow {
                 }
             }
 
+            RowLayout {
+                Layout.fillWidth: true
+
+                Label {
+                    text: qsTr("Exclusions (optional)")
+                    font.pixelSize: root.sectionTitleSize
+                    font.weight: Font.DemiBold
+                    color: root.accentColor
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    text: "+"
+                    font.pixelSize: 20
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Exclude a file or folder")
+                    onClicked: exclusionMenu.open()
+                }
+            }
+
+            Menu {
+                id: exclusionMenu
+
+                MenuItem {
+                    text: qsTr("Exclude files")
+                    onTriggered: exclusionFilesDialog.open()
+                }
+
+                MenuItem {
+                    text: qsTr("Exclude folder")
+                    onTriggered: exclusionFolderDialog.open()
+                }
+            }
+
+            FileDialog {
+                id: exclusionFilesDialog
+                title: qsTr("Select files to exclude")
+                fileMode: FileDialog.OpenFiles
+                onAccepted: selectedFiles.forEach(function (url) { root.addExclusion(url) })
+            }
+
+            FolderDialog {
+                id: exclusionFolderDialog
+                title: qsTr("Select folder to exclude")
+                onAccepted: root.addExclusion(selectedFolder)
+            }
+
             TextArea {
                 id: exclusionsField
-                placeholderText: qsTr("Excluded files or folders, one per line")
+                placeholderText: qsTr("Choose exclusions with + or enter paths, one per line")
                 wrapMode: TextArea.Wrap
                 Layout.fillWidth: true
                 Layout.preferredHeight: 72
-            }
-
-            Label {
-                text: qsTr("Remote Proton Drive folder")
-                font.pixelSize: root.sectionTitleSize
-                font.weight: Font.DemiBold
-                color: root.accentColor
-            }
-
-            Label {
-                text: qsTr("This is where Custos creates backup copies inside Proton Drive, not a local folder. The final folder name, such as set-1, identifies this backup set and can be changed.")
-                font.pixelSize: root.bodyTypeSize
-                lineHeight: root.bodyLeading
-                lineHeightMode: Text.ProportionalHeight
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-                Layout.maximumWidth: root.readableMeasure
-            }
-
-            TextField {
-                id: remoteField
-                placeholderText: qsTr("Example: /my-files/backups/custos")
-                Layout.fillWidth: true
-            }
-
-            Flow {
-                width: parent.width
-                spacing: 12
-
-                Label {
-                    text: qsTr("Retain successful copies")
-                    font.pixelSize: root.bodyTypeSize
-                }
-
-                SpinBox {
-                    id: retentionSpin
-                    from: 1
-                    to: 100
-                    value: 3
-                    editable: true
-                    width: 90
-                }
             }
 
             Flow {
@@ -822,9 +817,50 @@ ApplicationWindow {
                 Layout.fillWidth: true
             }
 
-            CheckBox {
-                id: acPowerCheck
-                text: qsTr("Only back up on AC power")
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    text: qsTr("Save")
+                    onClicked: {
+                        syncCurrentSet()
+                        backupSetController.save()
+                    }
+                }
+
+                Button {
+                    text: qsTr("Preview")
+                    onClicked: {
+                        syncCurrentSet()
+                        backupSetController.preview()
+                    }
+                }
+
+                Button {
+                    text: qsTr("Back up")
+                    enabled: sourceModel.count > 0 && setNameField.text.trim().length > 0
+                    onClicked: {
+                        syncCurrentSet()
+                        if (backupSetController.save()) {
+                            root.setStatus(qsTr("Starting background backup..."))
+                            backupLauncher.startBackup(backupSetController.currentId)
+                        }
+                    }
+                }
+
+                BusyIndicator {
+                    running: root.backupRunning
+                    visible: running
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                }
+
+                Label {
+                    text: qsTr("Backup in progress...")
+                    font.pixelSize: root.metadataTypeSize
+                    color: root.accentColor
+                    visible: root.backupRunning
+                }
             }
 
             Label {
@@ -845,57 +881,61 @@ ApplicationWindow {
                 wrapMode: Text.WordWrap
             }
 
-            TextArea {
-                id: requiredMountsField
-                placeholderText: qsTr("Required external volume mount points, one per line")
-                wrapMode: TextArea.Wrap
-                Layout.fillWidth: true
-                Layout.preferredHeight: 56
+            Button {
+                text: qsTr("Advanced settings")
+                checkable: true
+                checked: root.showAdvanced
+                onClicked: root.showAdvanced = checked
             }
 
-            RowLayout {
+            GroupBox {
+                visible: root.showAdvanced
+                title: qsTr("Advanced settings")
                 Layout.fillWidth: true
 
-                Button {
-                    text: qsTr("Save set")
-                    onClicked: {
-                        syncCurrentSet()
-                        backupSetController.save()
-                    }
-                }
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 12
 
-                Button {
-                    text: qsTr("Preview")
-                    onClicked: {
-                        syncCurrentSet()
-                        backupSetController.preview()
+                    Label {
+                        text: qsTr("Remote Proton Drive folder")
+                        font.pixelSize: root.sectionTitleSize
+                        font.weight: Font.DemiBold
+                        color: root.accentColor
                     }
-                }
 
-                Button {
-                    text: qsTr("Back up")
-                    enabled: backupSetController.previewIncluded.length > 0
-                    onClicked: {
-                        syncCurrentSet()
-                        if (backupSetController.save()) {
-                            root.setStatus(qsTr("Starting background backup..."))
-                            backupLauncher.startBackup(backupSetController.currentId)
+                    Label {
+                        text: qsTr("Copies are saved in Proton Drive under this folder, grouped by computer and backup name.")
+                        font.pixelSize: root.bodyTypeSize
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    TextField {
+                        id: remoteField
+                        placeholderText: qsTr("Example: /my-files/backups")
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        Label {
+                            text: qsTr("Successful copies to keep")
+                            font.pixelSize: root.bodyTypeSize
+                        }
+
+                        SpinBox {
+                            id: retentionSpin
+                            from: 1
+                            to: 100
+                            value: 3
+                            editable: true
                         }
                     }
-                }
 
-                BusyIndicator {
-                    running: root.backupRunning
-                    visible: running
-                    Layout.preferredWidth: 24
-                    Layout.preferredHeight: 24
-                }
-
-                            Label {
-                                text: qsTr("Backup in progress...")
-                                font.pixelSize: root.metadataTypeSize
-                                color: root.accentColor
-                    visible: root.backupRunning
+                    CheckBox {
+                        id: acPowerCheck
+                        text: qsTr("Only back up on AC power")
+                    }
                 }
             }
 
