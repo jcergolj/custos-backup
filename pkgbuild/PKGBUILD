@@ -1,7 +1,7 @@
 # Maintainer: Custos contributors
 
 pkgname=custos-git
-pkgver=0.1.r39.g713ff29
+pkgver=0.1.r42.g329cbc4
 pkgrel=1
 pkgdesc='Custos Backup client for Proton Drive'
 arch=('x86_64')

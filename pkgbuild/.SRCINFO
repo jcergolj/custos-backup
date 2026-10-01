@@ -1,6 +1,6 @@
 pkgbase = custos-git
 	pkgdesc = Custos Backup client for Proton Drive
-	pkgver = 0.1.r31.g500af0b
+	pkgver = 0.1.r42.g329cbc4
 	pkgrel = 1
 	url = https://github.com/jcergolj/custos-backup
 	install = custos.install
