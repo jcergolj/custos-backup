@@ -220,6 +220,17 @@ qt_add_executable(reliability-test
 target_link_libraries(reliability-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME reliability-test COMMAND reliability-test)
 
+qt_add_executable(workerrecovery-test
+    tests/workerrecovery_test.cpp
+    src/backuprunstore.cpp
+    src/backupconfig.cpp
+)
+target_link_libraries(workerrecovery-test PRIVATE Qt6::Core Qt6::Test)
+target_compile_definitions(workerrecovery-test PRIVATE OMACUSTOS_WORKER_BINARY="$<TARGET_FILE:omacustos-worker>")
+add_dependencies(workerrecovery-test omacustos-worker)
+add_test(NAME workerrecovery-test COMMAND workerrecovery-test)
+set_tests_properties(workerrecovery-test PROPERTIES TIMEOUT 60)
+
 qt_add_executable(backupconfig-test
     tests/backupconfig_test.cpp
     src/backupconfig.cpp

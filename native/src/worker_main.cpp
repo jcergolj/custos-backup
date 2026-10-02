@@ -57,11 +57,13 @@ int main(int argc, char *argv[])
         : parser.value(QStringLiteral("config"));
     const QString configPath = QFileInfo(configuredPath).absoluteFilePath();
     QLockFile processLock(configPath + QStringLiteral(".worker.lock"));
+    processLock.setStaleLockTime(0);
     if (!processLock.tryLock(0)) {
         return 0;
     }
     const QString stateDirectory = QFileInfo(configPath).absolutePath();
     QLockFile runStateLock(QDir(stateDirectory).filePath(QStringLiteral("omacustos-backup-runs.json.lock")));
+    runStateLock.setStaleLockTime(0);
     if (!runStateLock.tryLock(0)) {
         return 0;
     }
@@ -87,6 +89,10 @@ int main(int argc, char *argv[])
     if (!runStore.load(&error)) {
         qCritical().noquote() << error;
 
+        return 1;
+    }
+    if (runStore.recoverInterrupted(QDateTime::currentDateTime()) && !runStore.save(&error)) {
+        qCritical().noquote() << error;
         return 1;
     }
     for (const BackupSet &set : config.sets) {

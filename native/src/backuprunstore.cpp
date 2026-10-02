@@ -255,6 +255,23 @@ QVector<int> BackupRunStore::readyIndexes(const QDateTime &now) const
     return indexes;
 }
 
+bool BackupRunStore::recoverInterrupted(const QDateTime &now)
+{
+    bool recovered = false;
+    for (BackupRunRecord &record : runRecords) {
+        if (record.status != QStringLiteral("running")) {
+            continue;
+        }
+        markRetrying(record, QStringLiteral("The previous backup was interrupted; retrying."), now);
+        record.nextAttempt = now;
+        record.progress = {};
+        record.progressElapsedMs = 0;
+        record.progressUpdatedAt = {};
+        recovered = true;
+    }
+    return recovered;
+}
+
 BackupRunRecord *BackupRunStore::find(const QString &setId)
 {
     for (BackupRunRecord &record : runRecords) {

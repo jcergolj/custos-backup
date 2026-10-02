@@ -43,6 +43,8 @@ public:
     void ensureSet(const QString &setId);
     bool enqueue(const QString &setId, const QString &reason, const QDateTime &scheduledFor);
     QVector<int> readyIndexes(const QDateTime &now) const;
+    // Only call while holding the exclusive worker and run-state locks.
+    bool recoverInterrupted(const QDateTime &now);
     BackupRunRecord *find(const QString &setId);
     const BackupRunRecord *find(const QString &setId) const;
     void markRunning(BackupRunRecord &record);
