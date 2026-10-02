@@ -55,7 +55,7 @@ TestCase {
         restoreController.busy = false
         restoreController.loadingMessage = ""
         restoreController.showingCachedData = false
-        restoreController.restoreEligible = true
+        restoreController.verified = false
         restoreController.currentCopyIndex = -1
         restoreController.selectedCopy = -1
         restoreController.copySearch = ""
@@ -284,6 +284,7 @@ TestCase {
         mouseClick(control("restore-1"))
         restoreController.copies = ["Computer / Documents / copy-id"]
         restoreController.entries = ["/safe/documents/notes.txt", "/safe/documents/photo.jpg"]
+        restoreController.verified = true
         const scroll = control("dashboardScrollView").contentItem
         waitForRendering(app.contentItem)
         const files = control("restoreFilesList")
@@ -353,6 +354,41 @@ TestCase {
         compare(app.selectedRestoreIndexes, [0])
         compare(control("restoreFile-0").checked, true)
         compare(control("startRestoreButton").enabled, false)
+    }
+
+    function test_cachedRestoreFilesRequireVerificationAndDisableStartDuringTransfer() {
+        showRestoreFiles()
+        mouseClick(control("restoreFile-0"))
+        control("restoreDestinationField").text = "/safe/restore"
+        const start = control("startRestoreButton")
+        compare(start.enabled, true)
+
+        restoreController.verified = false
+        restoreController.showingCachedData = true
+        restoreController.busy = true
+        const cachedMessage = control("restoreCachedDataMessage")
+        compare(cachedMessage.visible, true)
+        verify(cachedMessage.text.indexOf("verification finishes") >= 0)
+        compare(start.enabled, false)
+        compare(app.selectedRestoreIndexes, [0])
+
+        restoreController.busy = false
+        compare(cachedMessage.visible, true)
+        verify(cachedMessage.text.indexOf("verify it again") >= 0)
+        compare(start.enabled, false)
+        restoreController.verified = true
+        restoreController.showingCachedData = false
+        compare(cachedMessage.visible, false)
+        compare(start.enabled, true)
+
+        restoreController.busy = true
+        compare(start.enabled, false)
+        control("restoreDestinationField").text = "/safe/retry"
+        restoreController.busy = false
+        restoreController.failed("Restore failed")
+        compare(app.showRestore, true)
+        compare(app.selectedRestoreIndexes, [0])
+        compare(start.enabled, true)
     }
 
     function test_restoreDestinationPickerUsesChosenFolder() {

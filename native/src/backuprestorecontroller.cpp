@@ -11,6 +11,9 @@ BackupRestoreController::BackupRestoreController(BackupEngine &engine, BackupPro
     , engine(engine)
     , provider(provider)
 {
+    // Eligibility depends on verification and on both browse/restore busy states.
+    connect(this, &BackupRestoreController::busyChanged,
+        this, &BackupRestoreController::restoreEligibilityChanged);
     connect(&watcher, &QFutureWatcher<BrowseResult>::finished, this, [this] {
         const BrowseResult result = watcher.result();
         if (discovering) {
@@ -28,7 +31,8 @@ BackupRestoreController::BackupRestoreController(BackupEngine &engine, BackupPro
                 if (selectedCopyIndex < 0) {
                     manifestEntries.clear();
                 }
-                setCachedData(false);
+                // Listing copies does not reverify the retained file list.
+                setCachedData(!manifestEntries.isEmpty());
             }
         } else if (result.success) {
             remoteCopies[selectedCopyIndex] = result.copy;

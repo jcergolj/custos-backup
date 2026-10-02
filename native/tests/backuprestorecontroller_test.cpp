@@ -9,6 +9,10 @@
 #include <QSemaphore>
 #include <QScopeGuard>
 #include <QTimer>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QScopedPointer>
 
 #include "../src/backuprestorecontroller.h"
 #include "../src/localprovider.h"
@@ -99,11 +103,233 @@ private slots:
     void completesOnlyAfterAllSelectedFilesAreRestored_data();
     void completesOnlyAfterAllSelectedFilesAreRestored();
     void restoresWithoutBlockingTheControllerThread();
+    void qmlEligibilityTracksVerificationAndRestore_data();
+    void qmlEligibilityTracksVerificationAndRestore();
+    void rediscoveryKeepsFilesCachedUntilReverification_data();
+    void rediscoveryKeepsFilesCachedUntilReverification();
+    void rediscoveryHandlesMissingCopies_data();
+    void rediscoveryHandlesMissingCopies();
     void browsesWithoutBlockingAndVerifiesOnlyTheSelectedCopy();
     void discoveryFailureClearsPreviousResultsAndAllowsRetry();
     void rejectsUnidentifiableCopies_data();
     void rejectsUnidentifiableCopies();
 };
+
+void BackupRestoreControllerTest::qmlEligibilityTracksVerificationAndRestore_data()
+{
+    QTest::addColumn<bool>("singleFile");
+    QTest::addColumn<bool>("failRestore");
+    QTest::newRow("single file succeeds") << true << false;
+    QTest::newRow("single file fails") << true << true;
+    QTest::newRow("selected files succeed") << false << false;
+    QTest::newRow("selected files fail") << false << true;
+}
+
+void BackupRestoreControllerTest::qmlEligibilityTracksVerificationAndRestore()
+{
+    QFETCH(bool, singleFile);
+    QFETCH(bool, failRestore);
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(remote.isValid());
+    QVERIFY(destination.isValid());
+    const QString folder = "backups/computer/Documents";
+    const QString copy = folder + "/copy";
+    QVERIFY(createCopy(remote, copy, "set-id", "copy"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    const auto unblock = qScopeGuard([&] { provider.release.release(10); });
+    QSignalSpy completed(&controller, &BackupRestoreController::restoreCompleted);
+    QSignalSpy failed(&controller, &BackupRestoreController::failed);
+
+    QQmlEngine qmlEngine;
+    qmlEngine.rootContext()->setContextProperty("restoreController", &controller);
+    QQmlComponent component(&qmlEngine);
+    component.setData(R"(import QtQml
+        QtObject {
+            property bool eligible: restoreController.restoreEligible
+            property var selectedRestoreIndexes: []
+            property string destination: ""
+            property bool startEnabled: restoreController.restoreEligible
+                && selectedRestoreIndexes.length > 0 && destination.trim().length > 0
+        })", QUrl());
+    QScopedPointer<QObject> view(component.create());
+    QVERIFY2(view, qPrintable(component.errorString()));
+    QVERIFY(!view->property("eligible").toBool());
+
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    provider.blockInspect = true;
+    controller.selectCopy(0);
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    QVERIFY(!view->property("eligible").toBool());
+    provider.release.release();
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(view->property("eligible").toBool());
+    QVERIFY(!view->property("startEnabled").toBool());
+    QVERIFY(view->setProperty("selectedRestoreIndexes", QVariantList {0}));
+    QVERIFY(!view->property("startEnabled").toBool());
+    QVERIFY(view->setProperty("destination", destination.path()));
+    QVERIFY(view->property("startEnabled").toBool());
+
+    provider.blockDownload = true;
+    if (failRestore) {
+        QVERIFY(QFile::remove(remote.filePath(copy + "/nested/notes.txt")));
+    }
+    if (singleFile) {
+        controller.restore(0, destination.path());
+    } else {
+        controller.restoreSelected({0}, destination.path());
+    }
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    QVERIFY(controller.busy());
+    QVERIFY(!view->property("eligible").toBool());
+    QVERIFY(!view->property("startEnabled").toBool());
+    // Editing a destination during transfer must not prevent retry after failure.
+    QVERIFY(view->setProperty("destination", destination.filePath("retry")));
+    provider.release.release();
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(view->property("eligible").toBool());
+    QVERIFY(view->property("startEnabled").toBool());
+    QCOMPARE(completed.count(), failRestore ? 0 : 1);
+    QCOMPARE(failed.count(), failRestore ? 1 : 0);
+    QCOMPARE(QFile::exists(destination.filePath("nested/notes.txt")), !failRestore);
+
+    if (failRestore) {
+        QVERIFY(createCopy(remote, copy, "set-id", "copy"));
+        provider.blockDownload = false;
+        controller.restoreSelected({0}, destination.filePath("retry"));
+        QTRY_VERIFY(!controller.busy());
+        QCOMPARE(completed.count(), 1);
+        QVERIFY(QFile::exists(destination.filePath("retry/nested/notes.txt")));
+    }
+}
+
+void BackupRestoreControllerTest::rediscoveryKeepsFilesCachedUntilReverification_data()
+{
+    QTest::addColumn<bool>("removeFile");
+    QTest::newRow("file still available") << false;
+    QTest::newRow("file disappeared") << true;
+}
+
+void BackupRestoreControllerTest::rediscoveryKeepsFilesCachedUntilReverification()
+{
+    QFETCH(bool, removeFile);
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(remote.isValid());
+    QVERIFY(destination.isValid());
+    const QString folder = "backups/computer/Documents";
+    const QString copy = folder + "/20261001-copy";
+    QVERIFY(createCopy(remote, copy, "set-id", "20261001-copy"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(controller.restoreEligible());
+    QVERIFY(!controller.showingCachedData());
+
+    // A new copy shifts the selected copy's index without changing its identity.
+    QVERIFY(createCopy(remote, folder + "/20261002-copy", "set-id", "20261002-copy"));
+    if (removeFile) {
+        QVERIFY(QFile::remove(remote.filePath(copy + "/nested/notes.txt")));
+    }
+    controller.discover(folder, "set-id");
+    QVERIFY(controller.busy());
+    QVERIFY(controller.showingCachedData());
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+    QVERIFY(!controller.restoreEligible());
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.currentCopyIndex(), 1);
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+    QVERIFY(controller.showingCachedData());
+    QVERIFY(!controller.restoreEligible());
+    QCOMPARE(provider.downloadedPaths, QStringList {copy + "/manifest.json"});
+
+    QSignalSpy failed(&controller, &BackupRestoreController::failed);
+    controller.restoreSelected({0}, destination.path());
+    QCOMPARE(failed.count(), 1);
+    QVERIFY(failed.first().first().toString().contains("not currently verified"));
+    QVERIFY(!QFile::exists(destination.filePath("nested/notes.txt")));
+
+    controller.selectCopy(1);
+    QVERIFY(controller.showingCachedData());
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(!controller.showingCachedData());
+    QCOMPARE(controller.currentCopyIndex(), 1);
+    QCOMPARE(provider.downloadedPaths.size(), 2);
+    if (removeFile) {
+        QVERIFY(controller.entries().isEmpty());
+        QCOMPARE(controller.unavailableEntries(), QStringList {"nested/notes.txt"});
+    } else {
+        QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+        QVERIFY(controller.restoreEligible());
+        controller.restoreSelected({0}, destination.path());
+        QTRY_VERIFY(!controller.busy());
+        QCOMPARE(failed.count(), 1);
+        QVERIFY(QFile::exists(destination.filePath("nested/notes.txt")));
+    }
+}
+
+void BackupRestoreControllerTest::rediscoveryHandlesMissingCopies_data()
+{
+    QTest::addColumn<bool>("failDiscovery");
+    QTest::newRow("selected copy disappeared") << false;
+    QTest::newRow("discovery failed") << true;
+}
+
+void BackupRestoreControllerTest::rediscoveryHandlesMissingCopies()
+{
+    QFETCH(bool, failDiscovery);
+    QTemporaryDir remote;
+    QVERIFY(remote.isValid());
+    const QString folder = "backups/computer/Documents";
+    const QString copy = folder + "/copy";
+    QVERIFY(createCopy(remote, copy, "set-id", "copy"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+
+    QVERIFY(QDir(remote.filePath(failDiscovery ? folder : copy)).removeRecursively());
+    QSignalSpy failed(&controller, &BackupRestoreController::failed);
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(!controller.restoreEligible());
+    QCOMPARE(failed.count(), failDiscovery ? 1 : 0);
+    if (failDiscovery) {
+        QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+        QCOMPARE(controller.copies().size(), 1);
+        QCOMPARE(controller.currentCopyIndex(), 0);
+        QVERIFY(controller.showingCachedData());
+    } else {
+        QVERIFY(controller.entries().isEmpty());
+        QVERIFY(controller.copies().isEmpty());
+        QCOMPARE(controller.currentCopyIndex(), -1);
+        QVERIFY(!controller.showingCachedData());
+    }
+
+    QVERIFY(createCopy(remote, copy, "set-id", "copy"));
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.copies().size(), 1);
+    QVERIFY(!controller.restoreEligible());
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+    QVERIFY(controller.restoreEligible());
+    QVERIFY(!controller.showingCachedData());
+}
 
 void BackupRestoreControllerTest::browsesWithoutBlockingAndVerifiesOnlyTheSelectedCopy()
 {

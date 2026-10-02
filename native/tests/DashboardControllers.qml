@@ -148,7 +148,8 @@ QtObject {
         property bool busy: false
         property string loadingMessage: ""
         property bool showingCachedData: false
-        property bool restoreEligible: true
+        property bool verified: false
+        readonly property bool restoreEligible: verified && !busy
         property int currentCopyIndex: -1
         property int selectedCopy: -1
         property var entries: []
