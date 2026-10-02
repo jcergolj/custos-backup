@@ -11,6 +11,7 @@
 #include "../src/backupengine.h"
 #include "../src/backupmanifest.h"
 #include "../src/protonprovider.h"
+#include "protonclifixture.h"
 
 class FakeRunner final : public ProcessRunner
 {
@@ -22,93 +23,6 @@ public:
     {
         arguments = requestedArguments;
         return response;
-    }
-};
-
-// Model the CLI's local-path + parent-folder contract, not the provider's
-// requested remote path. All transfer effects are real files in an isolated tree.
-class FilesystemRunner final : public ProcessRunner
-{
-public:
-    QTemporaryDir remote;
-    QStringList uploadedPaths;
-    QString failUploadName;
-    QString truncateUploadName;
-
-    QString remoteFile(const QString &path) const
-    {
-        return remote.filePath(path.mid(1));
-    }
-
-    ProcessOutput run(const QStringList &arguments) override
-    {
-        if (arguments.size() < 3 || arguments.first() != QStringLiteral("filesystem")) {
-            return {1, {}, QStringLiteral("Invalid CLI command")};
-        }
-        const QString command = arguments.at(1);
-        if (command == QStringLiteral("upload")) {
-            const QStringList options {"-j", "-f", "replace", "-d", "replace", "-t"};
-            if (arguments.size() != 10 || arguments.mid(2, 6) != options) {
-                return {1, {}, QStringLiteral("Invalid upload arguments")};
-            }
-            const QString localPath = arguments.at(8);
-            uploadedPaths.append(localPath);
-            const QString name = QFileInfo(localPath).fileName();
-            if (name == failUploadName) {
-                return {1, {}, QStringLiteral("Connection interrupted")};
-            }
-            const QString parent = remoteFile(arguments.last());
-            const QString destination = QDir(parent).filePath(name);
-            if (!QFileInfo(parent).isDir()) {
-                return {1, {}, QStringLiteral("Parent folder not found")};
-            }
-            QFile::remove(destination);
-            if (!QFile::copy(localPath, destination)) {
-                return {1, {}, QStringLiteral("Upload failed")};
-            }
-            if (name == truncateUploadName) {
-                QFile file(destination);
-                if (!file.open(QIODevice::WriteOnly) || !file.resize(1)) {
-                    return {1, {}, QStringLiteral("Fixture truncation failed")};
-                }
-            }
-            return {0, {}, {}};
-        }
-        if (command == QStringLiteral("info")) {
-            const QFileInfo file(remoteFile(arguments.last()));
-            if (!file.isFile()) {
-                return {1, {}, QStringLiteral("Node not found")};
-            }
-            const QJsonObject revision {{QStringLiteral("claimedSize"), file.size()}};
-            const QJsonObject info {{QStringLiteral("type"), QStringLiteral("file")},
-                {QStringLiteral("activeRevision"), revision}};
-            return {0, QString::fromUtf8(QJsonDocument(info).toJson()), {}};
-        }
-        if (command == QStringLiteral("list")) {
-            return QFileInfo(remoteFile(arguments.last())).isDir()
-                ? ProcessOutput {0, QStringLiteral("[]"), {}}
-                : ProcessOutput {1, {}, QStringLiteral("Folder not found")};
-        }
-        if (command == QStringLiteral("create-folder")) {
-            const QString parent = remoteFile(arguments.at(2));
-            if (QFileInfo(parent).isDir() && QDir(parent).mkdir(arguments.last())) {
-                return {0, {}, {}};
-            }
-            return {1, {}, QStringLiteral("Folder creation failed")};
-        }
-        if (command == QStringLiteral("download")) {
-            const QStringList options {"-j", "-f", "remove", "-d", "remove"};
-            if (arguments.size() != 9 || arguments.mid(2, 5) != options) {
-                return {1, {}, QStringLiteral("Invalid download arguments")};
-            }
-            const QString path = arguments.at(7);
-            const QString destination = QDir(arguments.last()).filePath(QFileInfo(path).fileName());
-            QFile::remove(destination);
-            return QFile::copy(remoteFile(path), destination)
-                ? ProcessOutput {0, {}, {}}
-                : ProcessOutput {1, {}, QStringLiteral("Download failed")};
-        }
-        return {1, {}, QStringLiteral("Unsupported CLI command")};
     }
 };
 

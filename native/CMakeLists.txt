@@ -185,6 +185,16 @@ qt_add_executable(protonprovider-test
 target_link_libraries(protonprovider-test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME protonprovider-test COMMAND protonprovider-test)
 
+qt_add_executable(protonclifixture-test
+    tests/protonclifixture_test.cpp
+    tests/protonclifixture.h
+    src/protonprovider.cpp
+    src/backupengine.cpp
+    src/backupmanifest.cpp
+)
+target_link_libraries(protonclifixture-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME protonclifixture-test COMMAND protonclifixture-test)
+
 qt_add_executable(backupjob-test
     tests/backupjob_test.cpp
     src/backupjob.cpp

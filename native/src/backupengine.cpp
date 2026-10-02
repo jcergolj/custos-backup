@@ -643,21 +643,26 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         return false;
     }
 
-    restoredFile.close();
-    if (QFileInfo::exists(destination) && !QFile::remove(destination)) {
-        QFile::remove(temporaryDestination);
-        if (error != nullptr) {
-            *error = QStringLiteral("The restore destination could not be replaced.");
-        }
-        return false;
-    }
-    if (!QFile::rename(temporaryDestination, destination)) {
+    // Commit verified bytes atomically; never delete the existing destination
+    // before replacement is ready, including when final placement fails.
+    QSaveFile replacement(destination);
+    replacement.setDirectWriteFallback(false);
+    const auto placementFailure = [&] {
+        restoredFile.close();
         QFile::remove(temporaryDestination);
         if (error != nullptr) {
             *error = QStringLiteral("The restored file could not be placed in the destination folder.");
         }
         return false;
+    };
+    if (!restoredFile.seek(0) || !replacement.open(QIODevice::WriteOnly)) return placementFailure();
+    while (!restoredFile.atEnd()) {
+        const QByteArray bytes = restoredFile.read(1024 * 1024);
+        if (bytes.isEmpty() || replacement.write(bytes) != bytes.size()) return placementFailure();
     }
+    if (!replacement.commit()) return placementFailure();
+    restoredFile.close();
+    QFile::remove(temporaryDestination);
 
     return true;
 }

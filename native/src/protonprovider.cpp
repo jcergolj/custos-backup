@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QTemporaryDir>
 #include <QtMath>
 
@@ -93,25 +94,40 @@ bool ProtonProvider::download(const QString &remotePath, const QString &localPat
         }
         return false;
     }
+    // CLI downloads preserve remote basenames and can remove conflicting files
+    // or folders. Keep those effects inside a private directory.
+    QTemporaryDir staging(QDir(localFolder).filePath(QStringLiteral(".omacustos-download-XXXXXX")));
+    if (!staging.isValid()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The Proton Drive download staging folder could not be created.");
+        }
+        return false;
+    }
     if (!run({
         QStringLiteral("filesystem"), QStringLiteral("download"), QStringLiteral("-j"),
         QStringLiteral("-f"), QStringLiteral("remove"), QStringLiteral("-d"), QStringLiteral("remove"),
-        remotePath, localFolder,
+        remotePath, staging.path(),
     }, error)) {
         return false;
     }
 
-    const QString downloaded = QDir(localFolder).filePath(QFileInfo(remotePath).fileName());
-    if (downloaded != localPath && QFileInfo::exists(downloaded)) {
-        QFile::remove(localPath);
-        if (!QFile::rename(downloaded, localPath)) {
-            if (error != nullptr) {
-                *error = QStringLiteral("The downloaded Proton Drive file could not be placed at the requested path.");
-            }
-            return false;
+    QFile downloaded(staging.filePath(QFileInfo(remotePath).fileName()));
+    QSaveFile destination(localPath);
+    destination.setDirectWriteFallback(false);
+    const auto placementFailure = [&] {
+        if (error != nullptr) {
+            *error = QStringLiteral("The downloaded Proton Drive file could not be placed at the requested path.");
         }
+        return false;
+    };
+    if (!downloaded.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly)) {
+        return placementFailure();
     }
-    return QFileInfo::exists(localPath);
+    while (!downloaded.atEnd()) {
+        const QByteArray bytes = downloaded.read(1024 * 1024);
+        if (bytes.isEmpty() || destination.write(bytes) != bytes.size()) return placementFailure();
+    }
+    return destination.commit() || placementFailure();
 }
 
 bool ProtonProvider::inspect(const QString &remotePath, RemoteFile *file, QString *error)

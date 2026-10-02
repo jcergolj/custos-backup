@@ -10,6 +10,7 @@ SOURCES += \
     ../src/backupmanifest.cpp
 
 HEADERS += \
+    protonclifixture.h \
     ../src/backupprovider.h \
     ../src/processrunner.h \
     ../src/protonprovider.h \
