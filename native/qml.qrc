@@ -1,5 +1,12 @@
 <RCC>
     <qresource prefix="/">
         <file>qml/Main.qml</file>
+        <file>qml/Dashboard.qml</file>
+        <file>qml/BackupEditor.qml</file>
+        <file>qml/RestorePanel.qml</file>
+        <file>qml/ActionButton.qml</file>
+        <file>qml/PreviewGroup.qml</file>
+        <file>qml/UiStyle.qml</file>
+        <file>qml/LocalPaths.js</file>
     </qresource>
 </RCC>

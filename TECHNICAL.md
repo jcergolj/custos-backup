@@ -3,6 +3,30 @@
 This document records implementation details that are useful for maintainers
 and advanced users but are not needed for the quick start.
 
+## Native And QML Structure
+
+CMake compiles shared implementations once into three static targets:
+
+- `omacustos-core`: storage, providers, configuration, execution, and systemd
+  helpers, linked only to Qt Core. The worker and installer use this target.
+- `omacustos-controllers`: UI-facing controllers and asynchronous operations,
+  linked to the core target and Qt Concurrent.
+- `omacustos-theme`: desktop palette integration, linked to Qt Gui.
+
+The application and native tests link these same targets instead of compiling
+separate copies of their sources. Add shared implementations to their library
+target; `omacustos_add_test` registers tests against the appropriate target.
+
+`Main.qml` composes the window, navigation, dialogs, and notifications.
+`Dashboard.qml` presents saved sets and recent runs and emits navigation requests.
+`BackupEditor.qml` owns its draft fields and controller synchronization.
+`RestorePanel.qml` owns file selection, destination, and selection reconciliation
+across copy refreshes; completion resets the panel and returns to the dashboard.
+These components receive controllers and `UiStyle` explicitly. `ActionButton`
+and `PreviewGroup` provide shared presentation, inheriting the window's live
+palette. Window state aliases and existing object/accessibility identifiers keep
+the dashboard test interface usable across the extraction.
+
 ## Local State
 
 OmaCustos stores user state under `~/.config/omacustos`:

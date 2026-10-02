@@ -867,6 +867,9 @@ TestCase {
         backupSetController.setNames = names
         const list = control("dashboardSetsList")
         tryCompare(list, "count", 15)
+        // Component/layout bindings settle after the window resize and model update.
+        waitForRendering(app.contentItem)
+        list.forceLayout()
         verify(list.contentHeight > list.height)
         verify(list.height <= 360)
         list.positionViewAtIndex(14, ListView.Contain)
@@ -874,7 +877,8 @@ TestCase {
         const button = control("setActions-14")
         const position = button.mapToItem(list, 0, 0)
         verify(position.y >= 0)
-        verify(position.y + button.height <= list.height)
+        verify(position.y + button.height <= list.height,
+            "Last action must fit: y=" + position.y + ", button=" + button.height + ", list=" + list.height)
         mouseClick(openMenu(14).itemAt(1))
         compare(backupLauncher.launchedId, "backup-id-14")
     }
