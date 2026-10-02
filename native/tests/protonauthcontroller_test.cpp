@@ -47,7 +47,9 @@ private slots:
         QVERIFY(!auth.checked());
         QTRY_VERIFY(auth.checked() && !auth.checking());
         QVERIFY(!auth.authenticated());
+        QVERIFY(auth.cliAvailable());
         QVERIFY(auth.error().contains("Not authenticated"));
+        QVERIFY(auth.error().contains("proton-drive auth login"));
         QVERIFY(writeFile(home.filePath("authenticated"), "yes"));
         auth.refresh();
         QTRY_VERIFY(auth.authenticated());
@@ -60,6 +62,7 @@ private slots:
         ProtonAuthController auth(QStringLiteral("/does/not/exist/proton-drive"));
         QTRY_VERIFY(auth.checked() && !auth.checking());
         QVERIFY(!auth.authenticated());
+        QVERIFY(!auth.cliAvailable());
         QVERIFY(auth.error().contains("Install proton-drive"));
         QSignalSpy errors(&auth, &ProtonAuthController::failed);
         auth.signIn();

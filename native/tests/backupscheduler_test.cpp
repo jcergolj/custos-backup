@@ -35,7 +35,8 @@ case "$*" in
     if [ -f "$base/query-fails" ]; then printf 'User bus unavailable' >&2; exit 1; fi
     printf 'LoadState=loaded\n'
     if [ -f "$base/active" ]; then
-      printf 'ActiveState=active\nUnitFileState=enabled\n'
+      printf 'ActiveState=active\n'
+      if [ -f "$base/session-only" ]; then printf 'UnitFileState=disabled\n'; else printf 'UnitFileState=enabled\n'; fi
     else
       printf 'ActiveState=inactive\nUnitFileState=disabled\n'
     fi
@@ -88,6 +89,7 @@ private slots:
         scheduler.applySavedSchedules();
         QTRY_VERIFY(!scheduler.busy());
         QVERIFY(scheduler.ready());
+        QVERIFY(scheduler.error().isEmpty());
         QVERIFY(scheduler.hasSchedules());
         QVERIFY(errors.isEmpty());
         QCOMPARE(messages.count(), 1);
@@ -109,6 +111,8 @@ private slots:
         BackupScheduler scheduler(home.filePath("config.json"), systemctl);
         QTRY_COMPARE(scheduler.status(), QString("Scheduling paused"));
         QVERIFY(!scheduler.ready());
+        QVERIFY(scheduler.error().contains("Enable scheduling"));
+        QVERIFY(scheduler.error().contains("automatically at login"));
         QVERIFY(!calls(home).contains("enable"));
         scheduler.enable();
         QTRY_VERIFY(scheduler.ready() && !scheduler.busy());
@@ -123,6 +127,7 @@ private slots:
         QVERIFY(!systemctl.isEmpty());
         BackupScheduler scheduler(home.filePath("config.json"), systemctl);
         QTRY_COMPARE(scheduler.status(), QString("No scheduled backups"));
+        QVERIFY(scheduler.error().isEmpty());
         scheduler.applySavedSchedules();
         QTRY_VERIFY(!scheduler.busy());
         QVERIFY(!calls(home).contains("enable"));
@@ -156,6 +161,9 @@ private slots:
         QTRY_VERIFY(!scheduler.busy());
         QVERIFY(!scheduler.ready());
         QVERIFY(!scheduler.error().isEmpty());
+        if (failureFile == "enable-fails") {
+            QVERIFY(scheduler.error().contains("systemctl --user unmask custos.timer"));
+        }
         QCOMPARE(errors.count(), 1);
         const QString activationError = scheduler.error();
         scheduler.refresh();
@@ -225,10 +233,29 @@ private slots:
         QVERIFY(!systemctl.isEmpty());
         BackupScheduler scheduler(home.filePath("config.json"), systemctl);
         QTRY_VERIFY(scheduler.ready() && !scheduler.busy());
+        QVERIFY(scheduler.error().isEmpty());
         QVERIFY(QFile::remove(home.filePath("active")));
         scheduler.refresh();
         QTRY_COMPARE(scheduler.status(), QString("Scheduling paused"));
         QVERIFY(!scheduler.ready());
+        QVERIFY(scheduler.error().contains("Enable scheduling"));
+    }
+
+    void sessionOnlyTimerExplainsHowToStartAtLogin()
+    {
+        QTemporaryDir home;
+        QVERIFY(home.isValid());
+        QVERIFY(config(home, "daily"));
+        QVERIFY(write(home.filePath("active"), "yes"));
+        QVERIFY(write(home.filePath("session-only"), "yes"));
+        const QString systemctl = cli(home);
+        QVERIFY(!systemctl.isEmpty());
+        BackupScheduler scheduler(home.filePath("config.json"), systemctl);
+        QTRY_COMPARE(scheduler.status(), QString("Scheduling active for this session only"));
+        QVERIFY(!scheduler.ready());
+        QVERIFY(scheduler.error().contains("Enable scheduling"));
+        QVERIFY(scheduler.error().contains("automatically at login"));
+        QVERIFY(!calls(home).contains("enable"));
     }
 };
 

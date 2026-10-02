@@ -20,7 +20,7 @@ public:
     bool ready() const { return active && enabled && lastError.isEmpty(); }
     bool hasSchedules() const { return scheduled; }
     QString status() const;
-    QString error() const { return lastError; }
+    QString error() const;
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void enable();
     void applySavedSchedules();

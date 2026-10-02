@@ -349,29 +349,6 @@ ApplicationWindow {
             }
 
             ActionButton {
-                objectName: "protonSignInButton"
-                text: protonAuth.checking ? qsTr("Checking Proton…") : qsTr("Sign in to Proton")
-                visible: !protonAuth.authenticated
-                enabled: protonAuth.checked && !protonAuth.checking
-                Layout.preferredHeight: 36
-                ToolTip.visible: hovered
-                ToolTip.text: protonAuth.error || qsTr("Open the Proton Drive CLI login in your terminal")
-                onClicked: protonAuth.signIn()
-            }
-
-            ActionButton {
-                objectName: "protonAuthRetryButton"
-                text: qsTr("↻")
-                visible: protonAuth.checked && !protonAuth.authenticated
-                enabled: !protonAuth.checking
-                Layout.preferredHeight: 36
-                Accessible.name: qsTr("Check Proton Drive sign-in")
-                ToolTip.visible: hovered
-                ToolTip.text: Accessible.name
-                onClicked: protonAuth.refresh()
-            }
-
-            ActionButton {
                 objectName: "importSetsButton"
                 text: qsTr("Import")
                 Layout.preferredHeight: 36
@@ -393,6 +370,8 @@ ApplicationWindow {
         }
 
         RowLayout {
+            objectName: "protonErrorRow"
+            visible: protonAuth.checked && !protonAuth.authenticated && protonAuth.error.length > 0
             Layout.fillWidth: true
             Layout.leftMargin: root.contentPadding
             Layout.rightMargin: root.contentPadding
@@ -400,11 +379,50 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                objectName: "schedulingStatusLabel"
-                text: backupScheduler.status
-                color: backupScheduler.ready ? root.inkColor : root.mutedColor
+                objectName: "protonErrorLabel"
+                text: protonAuth.error
+                color: root.inkColor
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: text
+            }
+
+            ActionButton {
+                objectName: "protonSignInButton"
+                text: qsTr("Sign in to Proton")
+                visible: protonAuth.cliAvailable
+                enabled: !protonAuth.checking
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Complete sign-in in your browser. Keep the terminal open until it finishes.")
+                onClicked: protonAuth.signIn()
+            }
+
+            ActionButton {
+                objectName: "protonAuthRetryButton"
+                text: qsTr("Retry")
+                enabled: !protonAuth.checking
+                onClicked: protonAuth.refresh()
+            }
+        }
+
+        RowLayout {
+            objectName: "schedulingErrorRow"
+            visible: backupScheduler.error.length > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: root.contentPadding
+            Layout.rightMargin: root.contentPadding
+            Layout.bottomMargin: 12
+            spacing: 12
+
+            Label {
+                objectName: "schedulingErrorLabel"
+                text: backupScheduler.error
+                color: root.inkColor
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: text
             }
 
             ActionButton {
@@ -414,28 +432,6 @@ ApplicationWindow {
                 enabled: !backupScheduler.busy && !resourceUsage.busy
                 onClicked: backupScheduler.enable()
             }
-
-            ActionButton {
-                objectName: "checkSchedulingButton"
-                text: qsTr("↻")
-                enabled: !backupScheduler.busy
-                Accessible.name: qsTr("Check scheduling status")
-                ToolTip.visible: hovered
-                ToolTip.text: Accessible.name
-                onClicked: backupScheduler.refresh()
-            }
-        }
-
-        Label {
-            objectName: "schedulingErrorLabel"
-            text: backupScheduler.error
-            visible: text.length > 0
-            color: root.inkColor
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-            Layout.leftMargin: root.contentPadding
-            Layout.rightMargin: root.contentPadding
-            Layout.bottomMargin: 12
         }
 
         StackLayout {
@@ -1402,7 +1398,6 @@ ApplicationWindow {
 
     Connections {
         target: backupScheduler
-        function onMessageChanged(message) { root.setStatus(message) }
         function onFailed(error) { root.setStatus(error) }
     }
 
@@ -1423,7 +1418,6 @@ ApplicationWindow {
 
     Connections {
         target: protonAuth
-        function onStatusChanged(message) { root.setStatus(message) }
         function onFailed(error) { root.setStatus(error) }
     }
 

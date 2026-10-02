@@ -14,7 +14,8 @@ ProtonAuthController::ProtonAuthController(QString executable, QObject *parent)
     connect(&probe, &QProcess::stateChanged, this, [this] { emit stateChanged(); });
     connect(&probe, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart) {
-            finishCheck(false, tr("Cannot start the Proton Drive CLI. Install proton-drive and try again."));
+            cliFound = false;
+            finishCheck(false, tr("Cannot start the Proton Drive CLI. Install proton-drive or check the configured CLI path, then retry."));
         }
     });
     connect(&probe, &QProcess::finished, this, [this](int exitCode, QProcess::ExitStatus status) {
@@ -25,8 +26,9 @@ ProtonAuthController::ProtonAuthController(QString executable, QObject *parent)
         }
         if (timedOut) {
             message = tr("Checking Proton Drive timed out. Check your connection and try again.");
-        } else if (!success && message.isEmpty()) {
-            message = tr("Unable to connect to Proton Drive. Sign in or check your connection.");
+        } else if (!success) {
+            const QString suggestion = tr("Unable to connect to Proton Drive. Run proton-drive auth login to sign in, or check your connection and retry.");
+            message = message.isEmpty() ? suggestion : suggestion + QStringLiteral("\n") + message;
         }
         finishCheck(success, success ? QString() : message);
     });
@@ -48,6 +50,11 @@ ProtonAuthController::~ProtonAuthController()
 void ProtonAuthController::refresh()
 {
     if (checking()) {
+        return;
+    }
+    cliFound = !QStandardPaths::findExecutable(executable).isEmpty();
+    if (!cliFound) {
+        finishCheck(false, tr("Cannot find the Proton Drive CLI. Install proton-drive or check the configured CLI path, then retry."));
         return;
     }
     timedOut = false;

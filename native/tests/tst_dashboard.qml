@@ -26,6 +26,7 @@ TestCase {
         protonAuth.authenticated = true
         protonAuth.checked = true
         protonAuth.checking = false
+        protonAuth.cliAvailable = true
         protonAuth.error = ""
         protonAuth.signInCount = 0
         protonAuth.refreshCount = 0
@@ -478,7 +479,7 @@ TestCase {
     function test_actionButtonsMatchImportAndExportAppearance() {
         const reference = control("importSetsButton")
         for (const name of ["exportSetsButton", "newBackupSetButton", "setActions-0",
-                            "openFolder-1", "restore-1", "recentActions-1", "checkSchedulingButton"]) {
+                            "openFolder-1", "restore-1", "recentActions-1"]) {
             const action = control(name)
             verify(action instanceof Button, name + " must use the same button control")
             compare(action.flat, reference.flat)
@@ -653,7 +654,9 @@ TestCase {
         const signIn = control("protonSignInButton")
         compare(signIn.visible, false)
         protonAuth.authenticated = false
+        protonAuth.error = "Not authenticated. Run proton-drive auth login."
         tryCompare(signIn, "visible", true)
+        compare(control("protonErrorLabel").text, protonAuth.error)
         waitForRendering(app.contentItem)
         mouseClick(signIn)
         compare(protonAuth.signInCount, 1)
@@ -667,22 +670,52 @@ TestCase {
         mouseClick(control("protonAuthRetryButton"))
         compare(protonAuth.refreshCount, refreshCount + 1)
         protonAuth.authenticated = true
+        protonAuth.error = ""
         tryCompare(signIn, "visible", false)
         compare(control("protonAuthRetryButton").visible, false)
+        compare(control("protonErrorRow").visible, false)
     }
 
-    function test_schedulingStatusAndActivationErrorsStayVisible() {
-        compare(control("schedulingStatusLabel").text, "Scheduling active")
+    function test_missingCliShowsInstallationHelpInsteadOfSignIn() {
+        protonAuth.authenticated = false
+        protonAuth.cliAvailable = false
+        protonAuth.error = "Cannot find the Proton Drive CLI. Install proton-drive and retry."
+        tryCompare(control("protonErrorRow"), "visible", true)
+        compare(control("protonErrorLabel").text, protonAuth.error)
+        compare(control("protonSignInButton").visible, false)
+        const refreshCount = protonAuth.refreshCount
+        mouseClick(control("protonAuthRetryButton"))
+        compare(protonAuth.refreshCount, refreshCount + 1)
+    }
+
+    function test_initialChecksAndHealthyStatesStayQuiet() {
+        protonAuth.authenticated = false
+        protonAuth.checked = false
+        protonAuth.checking = true
+        backupScheduler.ready = false
+        backupScheduler.busy = true
+        backupScheduler.status = "Checking scheduling…"
+        compare(control("protonErrorRow").visible, false)
+        compare(control("schedulingErrorRow").visible, false)
+        compare(findChild(app, "schedulingStatusLabel"), null)
+        compare(findChild(app, "checkSchedulingButton"), null)
+        protonAuth.statusChanged("Signed in to Proton Drive.")
+        backupScheduler.messageChanged("Backup settings saved. Scheduling is active.")
+        compare(control("notificationToast").visible, false)
+    }
+
+    function test_schedulingErrorsStayVisibleAndCanBeRetried() {
+        compare(control("schedulingErrorRow").visible, false)
         compare(control("enableSchedulingButton").visible, false)
         backupScheduler.ready = false
         backupScheduler.status = "Scheduling paused"
+        backupScheduler.error = "Scheduled backups are paused. Enable scheduling to resume them."
         tryCompare(control("enableSchedulingButton"), "visible", true)
         waitForRendering(app.contentItem)
         mouseClick(control("enableSchedulingButton"))
         compare(backupScheduler.enableCount, 1)
         backupScheduler.busy = true
         compare(control("enableSchedulingButton").enabled, false)
-        compare(control("checkSchedulingButton").enabled, false)
         backupScheduler.busy = false
         backupScheduler.error = "Unit custos.timer is masked"
         backupScheduler.status = "Scheduling needs attention"
@@ -691,11 +724,11 @@ TestCase {
         compare(error.text, "Unit custos.timer is masked")
         backupScheduler.failed("Could not activate scheduling")
         compare(control("notificationMessageLabel").text, "Could not activate scheduling")
-        const refreshCount = backupScheduler.refreshCount
-        mouseClick(control("checkSchedulingButton"))
-        compare(backupScheduler.refreshCount, refreshCount + 1)
         backupScheduler.hasSchedules = false
         compare(control("enableSchedulingButton").visible, false)
+        backupScheduler.error = ""
+        backupScheduler.ready = true
+        tryCompare(control("schedulingErrorRow"), "visible", false)
     }
 
     function test_resourceUsageOffersFiveGlobalPresetsAndSavesSelection() {

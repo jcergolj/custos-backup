@@ -10,6 +10,7 @@ class ProtonAuthController final : public QObject
     Q_PROPERTY(bool authenticated READ authenticated NOTIFY stateChanged)
     Q_PROPERTY(bool checked READ checked NOTIFY stateChanged)
     Q_PROPERTY(bool checking READ checking NOTIFY stateChanged)
+    Q_PROPERTY(bool cliAvailable READ cliAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString error READ error NOTIFY stateChanged)
 
 public:
@@ -18,6 +19,7 @@ public:
     bool authenticated() const { return connected; }
     bool checked() const { return hasChecked; }
     bool checking() const { return probe.state() != QProcess::NotRunning; }
+    bool cliAvailable() const { return cliFound; }
     QString error() const { return lastError; }
 
     Q_INVOKABLE void refresh();
@@ -35,6 +37,7 @@ private:
     QTimer timeout;
     QTimer refreshTimer;
     bool connected = false;
+    bool cliFound = false;
     bool hasChecked = false;
     bool timedOut = false;
     QString lastError;

@@ -31,6 +31,7 @@ QtObject {
         property bool authenticated: true
         property bool checked: true
         property bool checking: false
+        property bool cliAvailable: true
         property string error: ""
         property int signInCount: 0
         property int refreshCount: 0

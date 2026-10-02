@@ -29,11 +29,12 @@ Open **Custos Backup** from your app launcher, or run `custos`.
 Install the `proton-drive` CLI using the package or release source supported by
 your system. Authenticate it as the same user who will run Custos.
 
-When Custos cannot connect to Proton Drive, it shows **Sign in to Proton**.
-Press it to open the CLI login in your terminal, which launches your browser.
-Keep the terminal open until authentication completes. Custos checks the
-connection again automatically; use **↻** to check immediately. The button's
-tooltip shows the last connection error.
+When Custos cannot connect to Proton Drive, it shows a visible error with a
+suggested fix. If the CLI is missing, install `proton-drive` and press **Retry**.
+If you need to authenticate, press **Sign in to Proton** to open the CLI login
+in your terminal, which launches your browser. Keep the terminal open until
+authentication completes. Custos checks the connection again automatically;
+use **Retry** to check immediately. No connection status is shown when healthy.
 
 You can also sign in from a terminal:
 
@@ -102,22 +103,26 @@ system scheduling.
 Schedules can be daily, weekly, or monthly. If a monthly day does not exist in
 the current month, the last day of that month is used.
 
-### 4. Check scheduling
+### 4. Schedule automatic backups
 
 Choose a **daily**, **weekly**, or **monthly** schedule and press **Save**.
 Custos automatically enables and starts its scheduler; no terminal setup is
 needed. Importing backup sets with enabled schedules also activates scheduling.
 Manual-only backup sets do not activate it.
 
-The status below the app title shows **Scheduling active** once the timer is
-enabled and running. If activation fails, your backup settings remain saved and
-the error stays visible. Press **Enable scheduling** to retry, or **↻** to check
-the current status.
+The scheduler area stays hidden when scheduling is working. If activation fails,
+the timer is paused, or it is not enabled to start at login, a visible error
+explains what to do. Your backup settings remain saved. Press **Enable scheduling**
+to retry. Custos checks scheduling automatically while the app is open.
 
 The timer runs as your user while logged in and catches up overdue backups after
 your next login. It does not run while the computer is off or require user
 lingering for this login-session behavior. Make sure Proton Drive is signed in
 before expecting scheduled backups to succeed.
+
+You can close Custos: systemd starts the scheduler automatically at login and
+runs scheduled backups independently of the app. The app does not need to start
+at login or stay running in the background.
 
 ## Desktop theme
 
@@ -187,7 +192,7 @@ a standalone remote-root discovery action for a fresh installation.
 systemctl --user disable --now custos.timer
 ```
 
-Custos shows **Scheduling paused**. Use **Enable scheduling** to resume. Saving
+Custos shows a scheduling-paused error. Use **Enable scheduling** to resume. Saving
 backup settings while an enabled schedule exists also reactivates the timer.
 To make a backup manual-only, choose **disabled** for its schedule and save.
 

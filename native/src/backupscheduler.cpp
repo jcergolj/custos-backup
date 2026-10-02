@@ -50,6 +50,23 @@ BackupScheduler::~BackupScheduler()
     }
 }
 
+QString BackupScheduler::error() const
+{
+    if (!lastError.isEmpty()) {
+        if (lastError.contains(QStringLiteral("masked"), Qt::CaseInsensitive)) {
+            return tr("%1\nRun systemctl --user unmask custos.timer, then enable scheduling again.").arg(lastError);
+        }
+        return tr("%1\nCheck systemctl --user status custos.timer and journalctl --user -u custos.service for details.").arg(lastError);
+    }
+    if (!checked || !scheduled || ready()) {
+        return {};
+    }
+    if (active && !enabled) {
+        return tr("Scheduled backups are running for this session only. Enable scheduling to start them automatically at login.");
+    }
+    return tr("Scheduled backups are paused. Enable scheduling to resume them and start automatically at login.");
+}
+
 QString BackupScheduler::status() const
 {
     if (working && phase != Phase::Check) {
@@ -77,7 +94,7 @@ bool BackupScheduler::readSchedules()
     if (QFileInfo::exists(configPath) && !BackupConfigStore(configPath).load(&config, &error)) {
         scheduled = false;
         activationPending = false;
-        lastError = error;
+        lastError = tr("%1\nCheck the backup settings in %2 and try again.").arg(error, configPath);
         checked = true;
         emit stateChanged();
         return false;
