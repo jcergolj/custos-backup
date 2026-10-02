@@ -254,7 +254,7 @@ qt_add_executable(backuprestorecontroller-test
     src/backupengine.h
 )
 
-target_link_libraries(backuprestorecontroller-test PRIVATE Qt6::Core Qt6::Test)
+target_link_libraries(backuprestorecontroller-test PRIVATE Qt6::Core Qt6::Test Qt6::Concurrent)
 add_test(NAME backuprestorecontroller-test COMMAND backuprestorecontroller-test)
 
 qt_add_executable(retention-discovery-test

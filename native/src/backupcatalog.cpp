@@ -61,68 +61,96 @@ bool visit(BackupProvider &provider, const QString &path, const QString &rootPat
             continue;
         }
 
-        QTemporaryDir temporary;
-        if (!temporary.isValid()) {
-            if (error != nullptr) {
-                *error = QStringLiteral("Unable to create a temporary manifest folder.");
-            }
-            return false;
-        }
-        const QString manifestPath = temporary.filePath(QStringLiteral("manifest.json"));
-        QString providerError;
-        if (!provider.download(item.path, manifestPath, &providerError)) {
-            warning(error, providerError.isEmpty() ? QStringLiteral("A remote manifest could not be downloaded: %1").arg(item.path) : providerError);
+        RemoteCopy copy;
+        QString copyError;
+        if (!BackupCatalog::verifyCopy(provider, QFileInfo(item.path).path(), {}, &copy, &copyError)) {
+            warning(error, copyError);
             continue;
         }
-
-        QVector<BackupEntry> entries;
-        BackupManifestInfo info;
-        QString manifestError;
-        if (!BackupManifest::load(manifestPath, &entries, &info, &manifestError)) {
-            warning(error, QStringLiteral("The remote manifest %1 is unavailable: %2").arg(item.path, manifestError));
-            continue;
-        }
-        if (info.version != 2 || info.application != QStringLiteral("omacustos")
-            || info.computerName.isEmpty() || info.setId.isEmpty() || info.copyId.isEmpty()
-            || !info.createdAt.isValid()
-            || (info.status != QStringLiteral("complete") && info.status != QStringLiteral("incomplete"))) {
-            warning(error, QStringLiteral("The remote manifest %1 is not a supported OmaCustos copy.").arg(item.path));
-            continue;
-        }
-
-        RemoteCopy copy {
-            QDir::cleanPath(QDir(item.path).filePath(QStringLiteral(".."))),
-            item.path,
-            info.computerName,
-            info.setId,
-            info.setName,
-            info.copyId,
-            info.status,
-            info.createdAt,
-            {},
-            {},
-            info.failedItems,
-        };
-        for (const BackupEntry &entry : entries) {
-            if (!inside(entry.remotePath, copy.rootPath)) {
-                warning(error, QStringLiteral("The remote manifest %1 points outside its copy.").arg(item.path));
-                copy.unavailableItems.append(entry.restorePath);
-                continue;
-            }
-            RemoteFile remoteFile;
-            if (!provider.inspect(entry.remotePath, &remoteFile, &providerError)
-                || remoteFile.size != entry.size
-                || (!remoteFile.checksum.isEmpty() && remoteFile.checksum != entry.checksum)) {
-                copy.unavailableItems.append(entry.restorePath);
-                continue;
-            }
-            copy.entries.append(entry);
-        }
+        warning(error, copyError);
         copies->append(copy);
     }
     return true;
 }
 
+}
+
+bool BackupCatalog::listCopies(BackupProvider &provider, const QString &backupFolder, QVector<RemoteCopy> *copies, QString *error)
+{
+    if (copies == nullptr || backupFolder.trimmed().isEmpty()) {
+        warning(error, QStringLiteral("A remote backup folder and destination for copies are required."));
+        return false;
+    }
+    copies->clear();
+    const QString root = QDir::cleanPath(backupFolder);
+    QVector<RemoteItem> folders;
+    if (!provider.list(root, &folders, error)) {
+        return false;
+    }
+    QSet<QString> seen;
+    for (const RemoteItem &folder : folders) {
+        const QString path = QDir::cleanPath(folder.path);
+        if (!folder.directory || path != folder.path || QFileInfo(path).path() != root || seen.contains(path)) {
+            continue;
+        }
+        seen.insert(path);
+        copies->append({path, QDir(path).filePath(QStringLiteral("manifest.json")),
+            QFileInfo(QFileInfo(root).path()).fileName(), {}, QFileInfo(root).fileName(),
+            QFileInfo(path).fileName(), QStringLiteral("not verified"), {}, {}, {}, {}});
+    }
+    // Generated copy IDs begin with a UTC timestamp, so newest copies appear first.
+    std::sort(copies->begin(), copies->end(), [](const RemoteCopy &left, const RemoteCopy &right) {
+        return left.copyId > right.copyId;
+    });
+    return true;
+}
+
+bool BackupCatalog::verifyCopy(BackupProvider &provider, const QString &copyFolder, const QString &expectedSetId,
+    RemoteCopy *copy, QString *error)
+{
+    if (copy == nullptr || copyFolder.trimmed().isEmpty()) {
+        warning(error, QStringLiteral("A remote copy folder and destination are required."));
+        return false;
+    }
+    QTemporaryDir temporary;
+    if (!temporary.isValid()) {
+        warning(error, QStringLiteral("Unable to create a temporary manifest folder."));
+        return false;
+    }
+    const QString root = QDir::cleanPath(copyFolder);
+    const QString remoteManifest = QDir(root).filePath(QStringLiteral("manifest.json"));
+    const QString localManifest = temporary.filePath(QStringLiteral("manifest.json"));
+    QVector<BackupEntry> entries;
+    BackupManifestInfo info;
+    if (!provider.download(remoteManifest, localManifest, error)
+        || !BackupManifest::load(localManifest, &entries, &info, error)) {
+        warning(error, QStringLiteral("The remote manifest %1 is unavailable.").arg(remoteManifest));
+        return false;
+    }
+    if (info.version != 2 || info.application != QStringLiteral("omacustos")
+        || (!expectedSetId.isEmpty() && (info.setId != expectedSetId || info.copyId != QFileInfo(root).fileName()))) {
+        warning(error, QStringLiteral("The remote manifest %1 is not the expected OmaCustos backup copy.").arg(remoteManifest));
+        return false;
+    }
+    *copy = {root, remoteManifest, info.computerName, info.setId, info.setName, info.copyId,
+        info.status, info.createdAt, {}, {}, info.failedItems};
+    for (const BackupEntry &entry : entries) {
+        if (!inside(entry.remotePath, root)) {
+            warning(error, QStringLiteral("The remote manifest %1 points outside its copy.").arg(remoteManifest));
+            copy->unavailableItems.append(entry.restorePath);
+            continue;
+        }
+        RemoteFile remoteFile;
+        QString providerError;
+        if (!provider.inspect(entry.remotePath, &remoteFile, &providerError)
+            || remoteFile.size != entry.size
+            || (!remoteFile.checksum.isEmpty() && remoteFile.checksum != entry.checksum)) {
+            copy->unavailableItems.append(entry.restorePath);
+            continue;
+        }
+        copy->entries.append(entry);
+    }
+    return true;
 }
 
 bool BackupCatalog::discover(BackupProvider &provider, const QString &remoteRoot, QVector<RemoteCopy> *copies, QString *error)

@@ -51,6 +51,12 @@ TestCase {
         backupSetController.recentBackupTimestamps = ["", "01/10/2026 10:00:00"]
         backupLauncher.launchedId = ""
         restoreController.discoveredRoot = ""
+        restoreController.discoveredSetId = ""
+        restoreController.busy = false
+        restoreController.loadingMessage = ""
+        restoreController.currentCopyIndex = -1
+        restoreController.selectedCopy = -1
+        restoreController.copySearch = ""
         restoreController.entries = []
         restoreController.copies = []
         restoreController.unavailableEntries = []
@@ -232,6 +238,7 @@ TestCase {
         mouseClick(control("restore-1"))
         compare(backupSetController.currentIndex, 0)
         compare(restoreController.discoveredRoot, "/backups/documents-id")
+        compare(restoreController.discoveredSetId, "documents-id")
         compare(app.showRestore, true)
         compare(control("recentSummary-1").text, "Documents · succeeded · 01/10/2026 10:00:00")
     }
@@ -241,6 +248,34 @@ TestCase {
         compare(control("restore-1").enabled, false)
         mouseClick(control("restore-1"))
         compare(restoreController.discoveredRoot, "")
+    }
+
+    function test_restoreStaysOpenWhileLoadingAndRequiresExplicitCopySelection() {
+        mouseClick(control("restore-1"))
+        restoreController.busy = true
+        restoreController.loadingMessage = "Loading backup copies…"
+        compare(app.showRestore, true)
+        compare(control("restorePanel").visible, true)
+        verify(control("restoreLoadingIndicator").running)
+        compare(control("restoreLoadingMessage").text, "Loading backup copies…")
+        compare(control("restoreCopySelector").enabled, false)
+        compare(control("restoreCopySearch").enabled, false)
+        compare(control("restore-1").enabled, false)
+        compare(control("startRestoreButton").enabled, false)
+
+        restoreController.copies = ["Computer / Documents / copy-id"]
+        restoreController.busy = false
+        const selector = control("restoreCopySelector")
+        compare(selector.enabled, true)
+        compare(selector.currentIndex, -1)
+        compare(restoreController.selectedCopy, -1)
+        selector.currentIndex = 0
+        selector.activated(0)
+        compare(restoreController.selectedCopy, 0)
+        restoreController.busy = true
+        restoreController.loadingMessage = "Loading and verifying files…"
+        compare(control("restoreLoadingMessage").text, "Loading and verifying files…")
+        compare(selector.enabled, false)
     }
 
     function showRestoreFiles() {

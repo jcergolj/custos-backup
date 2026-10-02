@@ -158,6 +158,13 @@ void BackupSetControllerTest::folderPathUsesBackupIdentityAndWorkerNaming()
     const QString expected = QStringLiteral("/my-files/custom-backups/%1/Documents___notes").arg(hostname);
     QCOMPARE(controller.recentBackupFolderPath(documentsId), expected);
     QVERIFY(controller.recentBackupFolderPath(QStringLiteral("removed-id")).isEmpty());
+
+    BackupRunStore runs(directory.filePath(QStringLiteral("omacustos-backup-runs.json")));
+    runs.ensureSet(documentsId);
+    runs.find(documentsId)->remoteCopyPath = QStringLiteral("/my-files/backups/previous-computer/Original_name/copy-id");
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QCOMPARE(controller.recentBackupFolderPath(documentsId), QStringLiteral("/my-files/backups/previous-computer/Original_name"));
 }
 
 void BackupSetControllerTest::deletedCopyDisappearsFromRecentBackupsButKeepsItsSet()

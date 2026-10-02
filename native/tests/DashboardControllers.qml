@@ -145,12 +145,17 @@ QtObject {
     }
 
     property QtObject restoreController: QtObject {
+        property bool busy: false
+        property string loadingMessage: ""
+        property int currentCopyIndex: -1
+        property int selectedCopy: -1
         property var entries: []
         property var copies: []
         property var unavailableEntries: []
         property string copySearch: ""
         property string defaultDestination: "/safe/restore"
         property string discoveredRoot: ""
+        property string discoveredSetId: ""
         property var restoredIndexes: []
         property string restoreDestination: ""
         property int restoreCount: 0
@@ -158,8 +163,8 @@ QtObject {
         signal statusChanged(string status)
         signal failed(string error)
         signal restoreCompleted()
-        function discover(remoteRoot) { discoveredRoot = remoteRoot }
-        function selectCopy(index) {}
+        function discover(remoteRoot, setId) { discoveredRoot = remoteRoot; discoveredSetId = setId }
+        function selectCopy(index) { selectedCopy = index; currentCopyIndex = index }
         function restoreSelected(indexes, destination) {
             restoredIndexes = indexes.slice()
             restoreDestination = destination

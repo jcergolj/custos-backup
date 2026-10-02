@@ -155,8 +155,9 @@ files, Proton login, and this computer's global resource preset are not included
 ## Restore
 
 1. Press **Restore** on a backup in **Recent backups** that has a recorded run.
-2. Select a remote copy. Use the search field to filter by computer, backup name,
-   copy, or status.
+2. The restore panel opens immediately and loads copies for that backup in the
+   background. Select a remote copy to load and verify its files. Use the search
+   field to filter the listed copies by computer, backup name, copy, or status.
 3. Tick the verified files you want to restore.
 4. Use **Choose folder…** to select a separate destination folder, or enter its
    full path.

@@ -4,12 +4,57 @@
 
 #include <QDir>
 #include <QDateTime>
+#include <QtConcurrentRun>
 
 BackupRestoreController::BackupRestoreController(BackupEngine &engine, BackupProvider *provider, QObject *parent)
     : QObject(parent)
     , engine(engine)
     , provider(provider)
 {
+    connect(&watcher, &QFutureWatcher<BrowseResult>::finished, this, [this] {
+        const BrowseResult result = watcher.result();
+        if (discovering) {
+            remoteCopies = result.success ? result.copies : QVector<RemoteCopy> {};
+        } else if (result.success) {
+            remoteCopies[selectedCopyIndex] = result.copy;
+            manifestEntries = result.copy.entries;
+        }
+        loading = false;
+        emit copiesChanged();
+        emit currentCopyIndexChanged();
+        emit entriesChanged();
+        emit busyChanged();
+        if (!result.success) {
+            emit failed(result.error);
+        } else if (discovering) {
+            emit statusChanged(QStringLiteral("%1 backup copies found. Select one to load and verify its files.").arg(remoteCopies.size()));
+        } else {
+            const QString status = QStringLiteral("%1 verified files available; %2 unavailable or failed.")
+                .arg(manifestEntries.size()).arg(unavailableEntries().size());
+            emit statusChanged(result.error.isEmpty() ? status : status + QStringLiteral(" ") + result.error);
+        }
+    });
+}
+
+BackupRestoreController::~BackupRestoreController()
+{
+    watcher.waitForFinished();
+}
+
+bool BackupRestoreController::busy() const
+{
+    return loading;
+}
+
+QString BackupRestoreController::loadingMessage() const
+{
+    return !loading ? QString() : discovering
+        ? QStringLiteral("Loading backup copies…") : QStringLiteral("Loading and verifying files…");
+}
+
+int BackupRestoreController::currentCopyIndex() const
+{
+    return filteredCopyIndexes().indexOf(selectedCopyIndex);
 }
 
 QStringList BackupRestoreController::entries() const
@@ -32,9 +77,11 @@ QStringList BackupRestoreController::copies() const
     QStringList result;
     for (const int index : filteredCopyIndexes()) {
         const RemoteCopy &copy = remoteCopies.at(index);
-        result.append(QStringLiteral("%1 / %2 / %3 / %4 (%5)%6")
+        result.append(QStringLiteral("%1 / %2 / %3%4 (%5)%6")
             .arg(copy.computerName, copy.setName,
-                copy.copyId, copy.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm")), copy.status,
+                copy.copyId, copy.createdAt.isValid()
+                    ? QStringLiteral(" / ") + copy.createdAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"))
+                    : QString(), copy.status,
                 copy.unavailableItems.isEmpty() && copy.failedItems.isEmpty()
                     ? QString()
                     : QStringLiteral(" - some items unavailable")));
@@ -49,13 +96,14 @@ QString BackupRestoreController::copySearch() const
 
 void BackupRestoreController::setCopySearch(const QString &search)
 {
-    if (searchText == search) {
+    if (loading || searchText == search) {
         return;
     }
     searchText = search;
     selectedCopyIndex = -1;
     manifestEntries.clear();
     emit copiesChanged();
+    emit currentCopyIndexChanged();
     emit entriesChanged();
 }
 
@@ -87,6 +135,9 @@ QStringList BackupRestoreController::unavailableEntries() const
 
 void BackupRestoreController::loadManifest(const QString &path)
 {
+    if (loading) {
+        return;
+    }
     QVector<BackupEntry> loadedEntries;
     QString error;
     if (!BackupManifest::load(path, &loadedEntries, &error)) {
@@ -94,6 +145,7 @@ void BackupRestoreController::loadManifest(const QString &path)
         remoteCopies.clear();
         selectedCopyIndex = -1;
         emit copiesChanged();
+        emit currentCopyIndexChanged();
         emit entriesChanged();
         emit failed(error);
 
@@ -104,58 +156,76 @@ void BackupRestoreController::loadManifest(const QString &path)
     remoteCopies.clear();
     selectedCopyIndex = -1;
     emit copiesChanged();
+    emit currentCopyIndexChanged();
     emit entriesChanged();
     emit statusChanged(QStringLiteral("%1 files available for restore.").arg(manifestEntries.size()));
 }
 
-void BackupRestoreController::discover(const QString &remoteRoot)
+void BackupRestoreController::discover(const QString &backupFolder, const QString &setId)
 {
+    if (loading) {
+        return;
+    }
     if (provider == nullptr) {
         emit failed(QStringLiteral("No backup provider is configured."));
         return;
     }
 
-    QVector<RemoteCopy> discovered;
-    QString error;
-    if (!BackupCatalog::discover(*provider, remoteRoot, &discovered, &error)) {
-        remoteCopies.clear();
-        manifestEntries.clear();
-        selectedCopyIndex = -1;
-        emit copiesChanged();
-        emit entriesChanged();
-        emit failed(error);
-        return;
-    }
-
-    remoteCopies = std::move(discovered);
+    remoteCopies.clear();
     manifestEntries.clear();
     selectedCopyIndex = -1;
+    expectedSetId = setId;
+    searchText.clear();
+    discovering = true;
+    loading = true;
+    emit busyChanged();
     emit copiesChanged();
+    emit currentCopyIndexChanged();
     emit entriesChanged();
-    const QString status = QStringLiteral("%1 remote copies discovered. Select one to browse verified files.").arg(remoteCopies.size());
-    emit statusChanged(error.isEmpty() ? status : status + QStringLiteral(" ") + error);
+    watcher.setFuture(QtConcurrent::run([this, backupFolder] {
+        BrowseResult result;
+        result.success = BackupCatalog::listCopies(*provider, backupFolder, &result.copies, &result.error);
+        return result;
+    }));
 }
 
 void BackupRestoreController::selectCopy(int index)
 {
+    if (loading) {
+        return;
+    }
     const QVector<int> indexes = filteredCopyIndexes();
     const int actualIndex = index >= 0 && index < indexes.size() ? indexes.at(index) : -1;
-    if (actualIndex < 0) {
-        selectedCopyIndex = -1;
-        manifestEntries.clear();
-    } else {
-        selectedCopyIndex = actualIndex;
-        manifestEntries = remoteCopies.at(actualIndex).entries;
+    selectedCopyIndex = actualIndex;
+    manifestEntries.clear();
+    if (actualIndex >= 0) {
+        // Reverify on each selection: remote files may have changed since the last visit.
+        remoteCopies[actualIndex].entries.clear();
+        remoteCopies[actualIndex].unavailableItems.clear();
+        remoteCopies[actualIndex].failedItems.clear();
+        discovering = false;
+        loading = true;
+        emit busyChanged();
     }
+    emit currentCopyIndexChanged();
     emit entriesChanged();
-    emit statusChanged(selectedCopyIndex < 0
-        ? QStringLiteral("No remote copy selected.")
-        : QStringLiteral("%1 verified files available; %2 unavailable or failed.")
-            .arg(manifestEntries.size()).arg(unavailableEntries().size()));
+    if (actualIndex < 0) {
+        return;
+    }
+    const QString path = remoteCopies.at(actualIndex).rootPath;
+    const QString setId = expectedSetId;
+    watcher.setFuture(QtConcurrent::run([this, path, setId] {
+        BrowseResult result;
+        result.success = BackupCatalog::verifyCopy(*provider, path, setId, &result.copy, &result.error);
+        return result;
+    }));
 }
 
 void BackupRestoreController::restore(int index, const QString &destinationDirectory)
 {
+    if (loading) {
+        return;
+    }
     if (destinationDirectory.trimmed().isEmpty()) {
         emit failed(QStringLiteral("A restore destination folder is required."));
 
@@ -187,6 +257,9 @@ void BackupRestoreController::restore(int index, const QString &destinationDirec
 
 void BackupRestoreController::restoreSelected(const QVariantList &indexes, const QString &destinationDirectory)
 {
+    if (loading) {
+        return;
+    }
     if (indexes.isEmpty()) {
         emit failed(QStringLiteral("At least one restore file must be selected."));
         return;

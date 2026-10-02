@@ -144,7 +144,7 @@ ApplicationWindow {
         root.selectedRestoreIndexes = []
         destinationField.text = ""
         showRestore = true
-        restoreController.discover(backupSetController.currentRemoteRoot)
+        restoreController.discover(backupSetController.recentBackupFolderPath(setId), setId)
     }
 
     function openRecentBackupFolder(index) {
@@ -700,7 +700,7 @@ ApplicationWindow {
                                             objectName: "restore-" + recentRow.index
                                             text: qsTr("Restore")
                                             Layout.preferredHeight: 36
-                                            enabled: recentRow.timestamp.length > 0
+                                            enabled: recentRow.timestamp.length > 0 && !restoreController.busy
                                                 && backupSetController.setIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) >= 0
                                             onClicked: root.restoreRecentBackup(recentRow.index)
                                         }
@@ -761,17 +761,43 @@ ApplicationWindow {
                             }
 
                             TextField {
+                                objectName: "restoreCopySearch"
                                 placeholderText: qsTr("Search computer, backup name, copy, or status")
                                 text: restoreController.copySearch
+                                enabled: !restoreController.busy
                                 onTextChanged: restoreController.copySearch = text
                                 Layout.fillWidth: true
                             }
 
                             ComboBox {
                                 id: remoteCopySelector
+                                objectName: "restoreCopySelector"
                                 model: restoreController.copies
+                                currentIndex: restoreController.currentCopyIndex
+                                enabled: !restoreController.busy && count > 0
                                 Layout.fillWidth: true
-                                onCurrentIndexChanged: restoreController.selectCopy(currentIndex)
+                                onActivated: restoreController.selectCopy(currentIndex)
+                                displayText: currentIndex < 0 ? qsTr("Choose a backup copy…") : currentText
+                            }
+
+                            RowLayout {
+                                visible: restoreController.busy
+                                Layout.fillWidth: true
+
+                                BusyIndicator {
+                                    objectName: "restoreLoadingIndicator"
+                                    running: restoreController.busy
+                                    Layout.preferredWidth: 28
+                                    Layout.preferredHeight: 28
+                                }
+
+                                Label {
+                                    objectName: "restoreLoadingMessage"
+                                    text: restoreController.loadingMessage
+                                    color: root.mutedColor
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
                             }
 
                             Label {
@@ -836,7 +862,7 @@ ApplicationWindow {
                                 text: remoteCopySelector.currentIndex < 0
                                     ? qsTr("Choose a backup copy to see the files available to restore.")
                                     : qsTr("This copy has no verified files available to restore.")
-                                visible: restoreList.count === 0
+                                visible: restoreList.count === 0 && !restoreController.busy
                                 color: root.mutedColor
                                 wrapMode: Text.WordWrap
                                 Layout.fillWidth: true
@@ -894,7 +920,7 @@ ApplicationWindow {
                                 objectName: "startRestoreButton"
                                 text: qsTr("Start restore")
                                 Layout.alignment: Qt.AlignRight
-                                enabled: root.selectedRestoreIndexes.length > 0 && destinationField.text.trim().length > 0
+                                enabled: !restoreController.busy && root.selectedRestoreIndexes.length > 0 && destinationField.text.trim().length > 0
                                 onClicked: restoreController.restoreSelected(root.selectedRestoreIndexes, destinationField.text.trim())
                             }
 

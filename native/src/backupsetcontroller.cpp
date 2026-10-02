@@ -377,6 +377,10 @@ QString BackupSetController::recentBackupFolderPath(const QString &setId) const
 {
     for (const BackupSet &set : config.sets) {
         if (set.id == setId) {
+            const BackupRunRecord *record = runStore.find(setId);
+            if (record != nullptr && !record->remoteCopyPath.isEmpty()) {
+                return QFileInfo(record->remoteCopyPath).path();
+            }
             return set.remoteFolder(QSysInfo::machineHostName());
         }
     }

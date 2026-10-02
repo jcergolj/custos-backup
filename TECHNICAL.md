@@ -119,6 +119,16 @@ persisted so the next attempt resumes without expanding the deletion scope.
 
 ## Restore Safety
 
+Opening Restore lists only direct copy folders for the selected backup, using
+the recorded run's copy parent when available and the configured computer/backup
+folder otherwise. Listing runs in a background task; it does not traverse payload
+directories, download manifests, or inspect files. No copy is selected automatically.
+Selecting a copy downloads its manifest and verifies only that copy's files in
+the background. Loading indicators distinguish listing from verification; conflicting
+restore actions are disabled while either task runs. Each selection rechecks remote
+files, and manifest backup/copy identity must match the selection. Full verified
+catalog discovery remains available internally for retention.
+
 Restores are limited to manifest entries that passed verification. Destination
 traversal and symbolic-link escapes are rejected. The UI requires users to tick
 files and specify a destination folder before enabling its single **Start

@@ -6,9 +6,81 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSemaphore>
+#include <QScopeGuard>
+#include <QTimer>
 
 #include "../src/backuprestorecontroller.h"
 #include "../src/localprovider.h"
+
+class RestoreTestProvider final : public BackupProvider
+{
+public:
+    explicit RestoreTestProvider(const QString &root) : local(root) {}
+    LocalProvider local;
+    QStringList listedPaths;
+    QStringList downloadedPaths;
+    QStringList inspectedPaths;
+    QSemaphore entered;
+    QSemaphore release;
+    bool blockList = false;
+    bool blockInspect = false;
+
+    bool upload(const QString &source, const QString &path, QString *error) override { return local.upload(source, path, error); }
+    bool ensureDirectory(const QString &path, QString *error) override { return local.ensureDirectory(path, error); }
+    bool trash(const QString &path, QString *error) override { return local.trash(path, error); }
+    bool permanentlyDelete(const QString &path, QString *error) override { return local.permanentlyDelete(path, error); }
+    bool download(const QString &path, const QString &destination, QString *error) override
+    {
+        downloadedPaths.append(path);
+        return local.download(path, destination, error);
+    }
+    bool inspect(const QString &path, RemoteFile *file, QString *error) override
+    {
+        inspectedPaths.append(path);
+        if (blockInspect) {
+            entered.release();
+            release.tryAcquire(1, 5000);
+        }
+        return local.inspect(path, file, error);
+    }
+    bool list(const QString &path, QVector<RemoteItem> *items, QString *error) override
+    {
+        listedPaths.append(path);
+        if (blockList) {
+            entered.release();
+            release.tryAcquire(1, 5000);
+        }
+        if (!local.list(path, items, error)) {
+            return false;
+        }
+        // A provider response must not expand discovery beyond direct child folders.
+        items->append({"backups/other-computer/Other/copy", "copy", true, 0, {}});
+        items->append({path + "/copy/nested", "nested", true, 0, {}});
+        return true;
+    }
+};
+
+static bool createCopy(const QTemporaryDir &remote, const QString &folder, const QString &setId, const QString &copyId)
+{
+    if (!QDir().mkpath(remote.filePath(folder + "/nested"))) {
+        return false;
+    }
+    QFile file(remote.filePath(folder + "/nested/notes.txt"));
+    if (!file.open(QIODevice::WriteOnly) || file.write("notes") != 5) {
+        return false;
+    }
+    file.close();
+    const QJsonArray entries {QJsonObject {{"source", "/source/notes.txt"}, {"remote", folder + "/nested/notes.txt"},
+        {"restore", "nested/notes.txt"}, {"size", 5},
+        {"sha256", QString::fromLatin1(QCryptographicHash::hash("notes", QCryptographicHash::Sha256).toHex())}}};
+    QFile manifest(remote.filePath(folder + "/manifest.json"));
+    return manifest.open(QIODevice::WriteOnly)
+        && manifest.write(QJsonDocument(QJsonObject {{"version", 2}, {"application", "omacustos"},
+            {"computer", "computer"}, {"set_id", setId}, {"set_name", "Documents"}, {"copy_id", copyId},
+            {"created_at", "2026-10-02T12:00:00.000Z"}, {"status", "complete"},
+            {"expected", QJsonArray {"nested/notes.txt"}}, {"failed", QJsonArray {}}, {"entries", entries}}).toJson()) > 0;
+}
 
 class BackupRestoreControllerTest final : public QObject
 {
@@ -21,7 +93,143 @@ private slots:
     void rejectsEmptyDestination();
     void completesOnlyAfterAllSelectedFilesAreRestored_data();
     void completesOnlyAfterAllSelectedFilesAreRestored();
+    void browsesWithoutBlockingAndVerifiesOnlyTheSelectedCopy();
+    void discoveryFailureClearsPreviousResultsAndAllowsRetry();
+    void rejectsUnidentifiableCopies_data();
+    void rejectsUnidentifiableCopies();
 };
+
+void BackupRestoreControllerTest::browsesWithoutBlockingAndVerifiesOnlyTheSelectedCopy()
+{
+    QTemporaryDir remote;
+    QVERIFY(remote.isValid());
+    const QString folder = "backups/computer/Documents";
+    const QString newest = folder + "/20261002-copy";
+    QVERIFY(createCopy(remote, newest, "set-id", "20261002-copy"));
+    QVERIFY(createCopy(remote, folder + "/20261001-copy", "set-id", "20261001-copy"));
+    QVERIFY(createCopy(remote, "backups/other-computer/Other/copy", "other-id", "copy"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    provider.blockList = true;
+    BackupRestoreController controller(engine, &provider);
+    const auto unblock = qScopeGuard([&] { provider.release.release(10); });
+    QSignalSpy failures(&controller, &BackupRestoreController::failed);
+
+    controller.discover(folder, "set-id");
+    QVERIFY(controller.busy());
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    bool heartbeat = false;
+    QTimer::singleShot(0, &controller, [&] { heartbeat = true; });
+    QTRY_VERIFY(heartbeat);
+    QVERIFY(controller.busy());
+    QVERIFY(controller.copies().isEmpty());
+    controller.discover("backups/other-computer/Other", "other-id");
+    controller.setCopySearch("ignored while loading");
+    provider.release.release();
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(provider.listedPaths, QStringList {folder});
+    QCOMPARE(controller.copies().size(), 2);
+    QVERIFY(controller.copies().first().contains("20261002-copy"));
+    QCOMPARE(controller.currentCopyIndex(), -1);
+    QVERIFY(controller.entries().isEmpty());
+    QVERIFY(provider.downloadedPaths.isEmpty());
+    QVERIFY(provider.inspectedPaths.isEmpty());
+
+    provider.blockInspect = true;
+    controller.selectCopy(0);
+    QVERIFY(controller.busy());
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    heartbeat = false;
+    QTimer::singleShot(0, &controller, [&] { heartbeat = true; });
+    QTRY_VERIFY(heartbeat);
+    QVERIFY(controller.entries().isEmpty());
+    controller.selectCopy(1); // Busy selections cannot replace the in-flight result.
+    provider.release.release();
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.currentCopyIndex(), 0);
+    QCOMPARE(provider.downloadedPaths, QStringList {newest + "/manifest.json"});
+    QCOMPARE(provider.inspectedPaths, QStringList {newest + "/nested/notes.txt"});
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+    QCOMPARE(provider.listedPaths, QStringList {folder});
+    QVERIFY(failures.isEmpty());
+
+    // Changed files are rechecked instead of exposing stale verified entries.
+    provider.blockInspect = false;
+    QFile changed(remote.filePath(newest + "/nested/notes.txt"));
+    QVERIFY(changed.open(QIODevice::WriteOnly));
+    changed.write("other");
+    changed.close();
+    controller.selectCopy(0);
+    QVERIFY(controller.entries().isEmpty());
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(controller.entries().isEmpty());
+    QCOMPARE(controller.unavailableEntries(), QStringList {"nested/notes.txt"});
+    QCOMPARE(provider.downloadedPaths.size(), 2);
+    QCOMPARE(provider.inspectedPaths.size(), 2);
+}
+
+void BackupRestoreControllerTest::discoveryFailureClearsPreviousResultsAndAllowsRetry()
+{
+    QTemporaryDir remote;
+    QVERIFY(remote.isValid());
+    const QString folder = "backups/computer/Documents";
+    QVERIFY(createCopy(remote, folder + "/copy", "set-id", "copy"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    QSignalSpy failures(&controller, &BackupRestoreController::failed);
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(!controller.entries().isEmpty());
+    controller.discover("backups/missing", "set-id");
+    QVERIFY(controller.entries().isEmpty());
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(failures.count(), 1);
+    QVERIFY(controller.copies().isEmpty());
+    QCOMPARE(controller.currentCopyIndex(), -1);
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.copies().size(), 1);
+}
+
+void BackupRestoreControllerTest::rejectsUnidentifiableCopies_data()
+{
+    QTest::addColumn<QString>("manifestSetId");
+    QTest::addColumn<QString>("manifestCopyId");
+    QTest::addColumn<bool>("removeManifest");
+    QTest::newRow("wrong backup") << "other-id" << "copy" << false;
+    QTest::newRow("wrong copy") << "set-id" << "other-copy" << false;
+    QTest::newRow("missing manifest") << "set-id" << "copy" << true;
+}
+
+void BackupRestoreControllerTest::rejectsUnidentifiableCopies()
+{
+    QFETCH(QString, manifestSetId);
+    QFETCH(QString, manifestCopyId);
+    QFETCH(bool, removeManifest);
+    QTemporaryDir remote;
+    QVERIFY(remote.isValid());
+    const QString folder = "backups/computer/Documents";
+    QVERIFY(createCopy(remote, folder + "/copy", manifestSetId, manifestCopyId));
+    if (removeManifest) {
+        QVERIFY(QFile::remove(remote.filePath(folder + "/copy/manifest.json")));
+    }
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    QSignalSpy failures(&controller, &BackupRestoreController::failed);
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(failures.count(), 1);
+    QVERIFY(controller.entries().isEmpty());
+    QVERIFY(provider.inspectedPaths.isEmpty());
+}
 
 void BackupRestoreControllerTest::completesOnlyAfterAllSelectedFilesAreRestored_data()
 {
