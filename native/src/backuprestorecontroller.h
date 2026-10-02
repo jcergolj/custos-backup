@@ -19,6 +19,8 @@ class BackupRestoreController final : public QObject
     Q_PROPERTY(QStringList unavailableEntries READ unavailableEntries NOTIFY entriesChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString loadingMessage READ loadingMessage NOTIFY busyChanged)
+    Q_PROPERTY(bool showingCachedData READ showingCachedData NOTIFY cachedDataChanged)
+    Q_PROPERTY(bool restoreEligible READ restoreEligible NOTIFY restoreEligibilityChanged)
     Q_PROPERTY(int currentCopyIndex READ currentCopyIndex NOTIFY currentCopyIndexChanged)
 
 public:
@@ -34,6 +36,8 @@ public:
     Q_INVOKABLE void loadManifest(const QString &path);
     bool busy() const;
     QString loadingMessage() const;
+    bool showingCachedData() const;
+    bool restoreEligible() const;
     int currentCopyIndex() const;
     Q_INVOKABLE void discover(const QString &backupFolder, const QString &setId = QString());
     Q_INVOKABLE void selectCopy(int index);
@@ -43,6 +47,8 @@ public:
 
 signals:
     void busyChanged();
+    void cachedDataChanged();
+    void restoreEligibilityChanged();
     void currentCopyIndexChanged();
     void entriesChanged();
     void copiesChanged();
@@ -57,10 +63,21 @@ private:
         QString error;
         bool success = false;
     };
+    struct RestoreResult {
+        int restoredCount = 0;
+        QString error;
+        bool success = false;
+    };
     QFutureWatcher<BrowseResult> watcher;
+    QFutureWatcher<RestoreResult> restoreWatcher;
     bool loading = false;
+    bool restoring = false;
+    bool verified = false;
+    bool cachedData = false;
     bool discovering = false;
     QString expectedSetId;
+    QString activeBackupFolder;
+    QString pendingSelectedCopyPath;
     BackupEngine &engine;
     BackupProvider *provider;
     QVector<BackupEntry> manifestEntries;
@@ -68,5 +85,6 @@ private:
     int selectedCopyIndex = -1;
 
     QVector<int> filteredCopyIndexes() const;
+    void setCachedData(bool cached);
     QString searchText;
 };

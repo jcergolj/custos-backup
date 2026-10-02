@@ -54,6 +54,8 @@ TestCase {
         restoreController.discoveredSetId = ""
         restoreController.busy = false
         restoreController.loadingMessage = ""
+        restoreController.showingCachedData = false
+        restoreController.restoreEligible = true
         restoreController.currentCopyIndex = -1
         restoreController.selectedCopy = -1
         restoreController.copySearch = ""
@@ -302,6 +304,7 @@ TestCase {
         verify(control("restoreInstructions").text.indexOf("tick the files") >= 0)
         mouseClick(control("restoreFile-0"))
         compare(app.selectedRestoreIndexes, [0])
+        compare(app.selectedRestorePaths, ["/safe/documents/notes.txt"])
         compare(control("restoreSelectionCount").text, "Selected files: 1")
         compare(start.enabled, false)
         destination.text = "   "
@@ -342,13 +345,13 @@ TestCase {
         compare(control("notificationMessageLabel").text, "Restore failed")
     }
 
-    function test_changingRestoreFilesClearsVisibleTicksAndSelection() {
+    function test_refreshingRestoreFilesPreservesValidTicksAndSelection() {
         showRestoreFiles()
         mouseClick(control("restoreFile-0"))
         compare(control("restoreFile-0").checked, true)
         restoreController.entriesChanged()
-        compare(app.selectedRestoreIndexes, [])
-        compare(control("restoreFile-0").checked, false)
+        compare(app.selectedRestoreIndexes, [0])
+        compare(control("restoreFile-0").checked, true)
         compare(control("startRestoreButton").enabled, false)
     }
 

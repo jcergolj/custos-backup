@@ -12,6 +12,8 @@ ApplicationWindow {
     minimumHeight: 480
     title: qsTr("OmaCustos")
     property var selectedRestoreIndexes: []
+    property var selectedRestorePaths: []
+    property int selectedRestoreCopyIndex: -1
     property bool syncingCurrentSet: false
     property bool showEditor: false
     property bool showRestore: false
@@ -142,9 +144,16 @@ ApplicationWindow {
 
         backupSetController.currentIndex = setIndex
         root.selectedRestoreIndexes = []
+        root.selectedRestorePaths = []
+        root.selectedRestoreCopyIndex = -1
         destinationField.text = ""
         showRestore = true
         restoreController.discover(backupSetController.recentBackupFolderPath(setId), setId)
+        Qt.callLater(function () {
+            restoreCopySearch.forceActiveFocus()
+            dashboardScrollView.contentItem.contentY = Math.max(0,
+                restorePanel.mapToItem(dashboardScrollView.contentItem, 0, 0).y)
+        })
     }
 
     function openRecentBackupFolder(index) {
@@ -589,6 +598,7 @@ ApplicationWindow {
                                                         root.loadCurrentSet()
                                                         root.showAdvanced = false
                                                         root.showEditor = true
+                                                        Qt.callLater(function () { setNameField.forceActiveFocus() })
                                                     }
                                                 }
 
@@ -734,6 +744,7 @@ ApplicationWindow {
                     }
 
                     GroupBox {
+                        id: restorePanel
                         objectName: "restorePanel"
                         title: qsTr("Restore")
                         font.family: root.bodyFontFamily
@@ -761,6 +772,7 @@ ApplicationWindow {
                             }
 
                             TextField {
+                                id: restoreCopySearch
                                 objectName: "restoreCopySearch"
                                 placeholderText: qsTr("Search computer, backup name, copy, or status")
                                 text: restoreController.copySearch
@@ -776,12 +788,24 @@ ApplicationWindow {
                                 currentIndex: restoreController.currentCopyIndex
                                 enabled: !restoreController.busy && count > 0
                                 Layout.fillWidth: true
-                                onActivated: restoreController.selectCopy(currentIndex)
+                                onModelChanged: {
+                                    if (restoreController.currentCopyIndex < 0) {
+                                        currentIndex = -1
+                                    }
+                                }
+                                onActivated: {
+                                    if (root.selectedRestoreCopyIndex !== currentIndex) {
+                                        root.selectedRestoreIndexes = []
+                                        root.selectedRestorePaths = []
+                                    }
+                                    root.selectedRestoreCopyIndex = currentIndex
+                                    restoreController.selectCopy(currentIndex)
+                                }
                                 displayText: currentIndex < 0 ? qsTr("Choose a backup copy…") : currentText
                             }
 
-                            RowLayout {
-                                visible: restoreController.busy
+                             RowLayout {
+                                 visible: restoreController.busy
                                 Layout.fillWidth: true
 
                                 BusyIndicator {
@@ -797,10 +821,21 @@ ApplicationWindow {
                                     color: root.mutedColor
                                     wrapMode: Text.WordWrap
                                     Layout.fillWidth: true
-                                }
-                            }
+                                 }
+                             }
 
-                            Label {
+                             Label {
+                                 objectName: "restoreCachedDataMessage"
+                                 text: restoreController.busy
+                                     ? qsTr("Showing the last successful result while refreshing. Cached files cannot be restored until verification finishes.")
+                                     : qsTr("Showing cached data from the last successful refresh. Select the copy to verify it again.")
+                                 visible: restoreController.showingCachedData
+                                 color: root.mutedColor
+                                 wrapMode: Text.WordWrap
+                                 Layout.fillWidth: true
+                             }
+
+                             Label {
                                 text: qsTr("Unavailable or failed items: %1").arg(restoreController.unavailableEntries.length)
                                 font.pixelSize: root.metadataTypeSize
                                 visible: restoreController.unavailableEntries.length > 0
@@ -854,6 +889,9 @@ ApplicationWindow {
                                             selected.splice(position, 1)
                                         }
                                         root.selectedRestoreIndexes = selected
+                                        root.selectedRestorePaths = selected.map(function (selectedIndex) {
+                                            return restoreController.entries[selectedIndex]
+                                        })
                                     }
                                 }
                             }
@@ -920,7 +958,7 @@ ApplicationWindow {
                                 objectName: "startRestoreButton"
                                 text: qsTr("Start restore")
                                 Layout.alignment: Qt.AlignRight
-                                enabled: !restoreController.busy && root.selectedRestoreIndexes.length > 0 && destinationField.text.trim().length > 0
+                                enabled: restoreController.restoreEligible && root.selectedRestoreIndexes.length > 0 && destinationField.text.trim().length > 0
                                 onClicked: restoreController.restoreSelected(root.selectedRestoreIndexes, destinationField.text.trim())
                             }
 
@@ -1492,11 +1530,33 @@ ApplicationWindow {
         function onRestoreCompleted() {
             root.showRestore = false
             root.selectedRestoreIndexes = []
+            root.selectedRestorePaths = []
+            root.selectedRestoreCopyIndex = -1
             destinationField.text = ""
             dashboardScrollView.contentItem.contentY = 0
         }
-        function onEntriesChanged() { root.selectedRestoreIndexes = [] }
-        function onCopiesChanged() { remoteCopySelector.currentIndex = -1 }
+        function onEntriesChanged() {
+            const paths = root.selectedRestorePaths.length > 0
+                ? root.selectedRestorePaths : root.selectedRestoreIndexes.map(function (index) {
+                    return restoreController.entries[index]
+                })
+            if (restoreController.entries.length === 0 && restoreController.busy) {
+                return
+            }
+            root.selectedRestoreIndexes = paths.map(function (path) {
+                return restoreController.entries.indexOf(path)
+            }).filter(function (index) { return index >= 0 })
+            root.selectedRestorePaths = root.selectedRestoreIndexes.map(function (index) {
+                return restoreController.entries[index]
+            })
+        }
+        function onCurrentCopyIndexChanged() {
+            if (root.selectedRestoreCopyIndex !== restoreController.currentCopyIndex) {
+                root.selectedRestoreIndexes = []
+                root.selectedRestorePaths = []
+                root.selectedRestoreCopyIndex = restoreController.currentCopyIndex
+            }
+        }
         function onStatusChanged(status) { root.setStatus(status) }
         function onFailed(error) { root.setStatus(error) }
     }

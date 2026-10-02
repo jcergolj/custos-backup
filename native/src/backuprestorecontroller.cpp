@@ -14,10 +14,30 @@ BackupRestoreController::BackupRestoreController(BackupEngine &engine, BackupPro
     connect(&watcher, &QFutureWatcher<BrowseResult>::finished, this, [this] {
         const BrowseResult result = watcher.result();
         if (discovering) {
-            remoteCopies = result.success ? result.copies : QVector<RemoteCopy> {};
+            if (result.success) {
+                remoteCopies = result.copies;
+                selectedCopyIndex = -1;
+                if (!pendingSelectedCopyPath.isEmpty()) {
+                    for (int index = 0; index < remoteCopies.size(); ++index) {
+                        if (remoteCopies.at(index).rootPath == pendingSelectedCopyPath) {
+                            selectedCopyIndex = index;
+                            break;
+                        }
+                    }
+                }
+                if (selectedCopyIndex < 0) {
+                    manifestEntries.clear();
+                }
+                setCachedData(false);
+            }
         } else if (result.success) {
             remoteCopies[selectedCopyIndex] = result.copy;
             manifestEntries = result.copy.entries;
+            setCachedData(false);
+            if (!verified) {
+                verified = true;
+                emit restoreEligibilityChanged();
+            }
         }
         loading = false;
         emit copiesChanged();
@@ -25,6 +45,11 @@ BackupRestoreController::BackupRestoreController(BackupEngine &engine, BackupPro
         emit entriesChanged();
         emit busyChanged();
         if (!result.success) {
+            setCachedData(!remoteCopies.isEmpty() || !manifestEntries.isEmpty());
+            if (!discovering && verified) {
+                verified = false;
+                emit restoreEligibilityChanged();
+            }
             emit failed(result.error);
         } else if (discovering) {
             emit statusChanged(QStringLiteral("%1 backup copies found. Select one to load and verify its files.").arg(remoteCopies.size()));
@@ -34,22 +59,56 @@ BackupRestoreController::BackupRestoreController(BackupEngine &engine, BackupPro
             emit statusChanged(result.error.isEmpty() ? status : status + QStringLiteral(" ") + result.error);
         }
     });
+    connect(&restoreWatcher, &QFutureWatcher<RestoreResult>::finished, this, [this] {
+        const RestoreResult result = restoreWatcher.result();
+        restoring = false;
+        emit busyChanged();
+        if (!result.success) {
+            emit failed(result.error);
+            return;
+        }
+
+        emit statusChanged(result.restoredCount == 1
+            ? QStringLiteral("File restored successfully.")
+            : QStringLiteral("%1 files restored successfully.").arg(result.restoredCount));
+        emit restoreCompleted();
+    });
 }
 
 BackupRestoreController::~BackupRestoreController()
 {
     watcher.waitForFinished();
+    restoreWatcher.waitForFinished();
 }
 
 bool BackupRestoreController::busy() const
 {
-    return loading;
+    return loading || restoring;
 }
 
 QString BackupRestoreController::loadingMessage() const
 {
-    return !loading ? QString() : discovering
+    return restoring ? QStringLiteral("Restoring files…") : !loading ? QString() : discovering
         ? QStringLiteral("Loading backup copies…") : QStringLiteral("Loading and verifying files…");
+}
+
+bool BackupRestoreController::restoreEligible() const
+{
+    return verified && !busy();
+}
+
+bool BackupRestoreController::showingCachedData() const
+{
+    return cachedData;
+}
+
+void BackupRestoreController::setCachedData(bool cached)
+{
+    if (cachedData == cached) {
+        return;
+    }
+    cachedData = cached;
+    emit cachedDataChanged();
 }
 
 int BackupRestoreController::currentCopyIndex() const
@@ -96,12 +155,17 @@ QString BackupRestoreController::copySearch() const
 
 void BackupRestoreController::setCopySearch(const QString &search)
 {
-    if (loading || searchText == search) {
+    if (busy() || searchText == search) {
         return;
     }
     searchText = search;
     selectedCopyIndex = -1;
     manifestEntries.clear();
+    setCachedData(false);
+    if (verified) {
+        verified = false;
+        emit restoreEligibilityChanged();
+    }
     emit copiesChanged();
     emit currentCopyIndexChanged();
     emit entriesChanged();
@@ -137,14 +201,19 @@ QStringList BackupRestoreController::unavailableEntries() const
 
 void BackupRestoreController::loadManifest(const QString &path)
 {
-    if (loading) {
+    if (busy()) {
         return;
     }
     QVector<BackupEntry> loadedEntries;
     QString error;
     if (!BackupManifest::load(path, &loadedEntries, &error)) {
+        if (verified) {
+            verified = false;
+            emit restoreEligibilityChanged();
+        }
         manifestEntries.clear();
         remoteCopies.clear();
+        setCachedData(false);
         selectedCopyIndex = -1;
         emit copiesChanged();
         emit currentCopyIndexChanged();
@@ -155,6 +224,11 @@ void BackupRestoreController::loadManifest(const QString &path)
     }
 
     manifestEntries = std::move(loadedEntries);
+    setCachedData(false);
+    if (!verified) {
+        verified = true;
+        emit restoreEligibilityChanged();
+    }
     remoteCopies.clear();
     selectedCopyIndex = -1;
     emit copiesChanged();
@@ -165,7 +239,7 @@ void BackupRestoreController::loadManifest(const QString &path)
 
 void BackupRestoreController::discover(const QString &backupFolder, const QString &setId)
 {
-    if (loading) {
+    if (busy()) {
         return;
     }
     if (provider == nullptr) {
@@ -173,10 +247,21 @@ void BackupRestoreController::discover(const QString &backupFolder, const QStrin
         return;
     }
 
-    remoteCopies.clear();
-    manifestEntries.clear();
-    selectedCopyIndex = -1;
+    const bool sameContext = activeBackupFolder == backupFolder && expectedSetId == setId;
+    pendingSelectedCopyPath = sameContext && selectedCopyIndex >= 0 && selectedCopyIndex < remoteCopies.size()
+        ? remoteCopies.at(selectedCopyIndex).rootPath : QString();
+    if (!sameContext) {
+        remoteCopies.clear();
+        manifestEntries.clear();
+        selectedCopyIndex = -1;
+    }
+    setCachedData(sameContext && (!remoteCopies.isEmpty() || !manifestEntries.isEmpty()));
+    if (verified) {
+        verified = false;
+        emit restoreEligibilityChanged();
+    }
     expectedSetId = setId;
+    activeBackupFolder = backupFolder;
     searchText.clear();
     discovering = true;
     loading = true;
@@ -193,13 +278,21 @@ void BackupRestoreController::discover(const QString &backupFolder, const QStrin
 
 void BackupRestoreController::selectCopy(int index)
 {
-    if (loading) {
+    if (busy()) {
         return;
     }
     const QVector<int> indexes = filteredCopyIndexes();
     const int actualIndex = index >= 0 && index < indexes.size() ? indexes.at(index) : -1;
+    const int previousIndex = selectedCopyIndex;
     selectedCopyIndex = actualIndex;
-    manifestEntries.clear();
+    if (actualIndex != previousIndex) {
+        manifestEntries.clear();
+    }
+    if (verified) {
+        verified = false;
+        emit restoreEligibilityChanged();
+    }
+    setCachedData(actualIndex == previousIndex && !manifestEntries.isEmpty());
     if (actualIndex >= 0) {
         // Reverify on each selection: remote files may have changed since the last visit.
         remoteCopies[actualIndex].entries.clear();
@@ -225,7 +318,7 @@ void BackupRestoreController::selectCopy(int index)
 
 void BackupRestoreController::restore(int index, const QString &destinationDirectory)
 {
-    if (loading) {
+    if (busy()) {
         return;
     }
     if (destinationDirectory.trimmed().isEmpty()) {
@@ -240,46 +333,87 @@ void BackupRestoreController::restore(int index, const QString &destinationDirec
         return;
     }
 
+    if (!restoreEligible()) {
+        emit failed(QStringLiteral("The selected backup copy is not currently verified."));
+        return;
+    }
+
     if (index < 0 || index >= manifestEntries.size()) {
         emit failed(QStringLiteral("The selected restore file is invalid."));
 
         return;
     }
 
-    QString error;
-    if (!engine.restoreFile(manifestEntries.at(index), destinationDirectory, *provider, &error)) {
-        emit failed(error);
-
-        return;
-    }
-
-    emit statusChanged(QStringLiteral("File restored successfully."));
-    emit restoreCompleted();
+    const QVector<BackupEntry> entries {manifestEntries.at(index)};
+    const QString destination = destinationDirectory;
+    BackupEngine *enginePointer = &engine;
+    BackupProvider *providerPointer = provider;
+    restoring = true;
+    emit busyChanged();
+    restoreWatcher.setFuture(QtConcurrent::run([enginePointer, providerPointer, entries, destination] {
+        RestoreResult result;
+        result.success = enginePointer->restoreFile(entries.first(), destination, *providerPointer, &result.error);
+        result.restoredCount = result.success ? 1 : 0;
+        return result;
+    }));
 }
 
 void BackupRestoreController::restoreSelected(const QVariantList &indexes, const QString &destinationDirectory)
 {
-    if (loading) {
+    if (busy()) {
         return;
     }
     if (indexes.isEmpty()) {
         emit failed(QStringLiteral("At least one restore file must be selected."));
         return;
     }
+
+    if (destinationDirectory.trimmed().isEmpty()) {
+        emit failed(QStringLiteral("A restore destination folder is required."));
+        return;
+    }
+
+    if (provider == nullptr) {
+        emit failed(QStringLiteral("No backup provider is configured."));
+        return;
+    }
+
+    if (!restoreEligible()) {
+        emit failed(QStringLiteral("The selected backup copy is not currently verified."));
+        return;
+    }
+
+    QVector<BackupEntry> entries;
+    entries.reserve(indexes.size());
     for (const QVariant &value : indexes) {
         const int index = value.toInt();
         if (index < 0 || index >= manifestEntries.size()) {
             emit failed(QStringLiteral("The selected restore file is invalid."));
             return;
         }
-        QString error;
-        if (provider == nullptr || !engine.restoreFile(manifestEntries.at(index), destinationDirectory, *provider, &error)) {
-            emit failed(error.isEmpty() ? QStringLiteral("The selected restore file could not be restored.") : error);
-            return;
-        }
+        entries.append(manifestEntries.at(index));
     }
-    emit statusChanged(QStringLiteral("%1 files restored successfully.").arg(indexes.size()));
-    emit restoreCompleted();
+
+    const QString destination = destinationDirectory;
+    BackupEngine *enginePointer = &engine;
+    BackupProvider *providerPointer = provider;
+    restoring = true;
+    emit busyChanged();
+    restoreWatcher.setFuture(QtConcurrent::run([enginePointer, providerPointer, entries, destination] {
+        RestoreResult result;
+        result.success = true;
+        for (const BackupEntry &entry : entries) {
+            if (!enginePointer->restoreFile(entry, destination, *providerPointer, &result.error)) {
+                result.success = false;
+                if (result.error.isEmpty()) {
+                    result.error = QStringLiteral("The selected restore file could not be restored.");
+                }
+                return result;
+            }
+            ++result.restoredCount;
+        }
+        return result;
+    }));
 }
 
 void BackupRestoreController::restoreFolder(const QString &folder, const QString &destinationDirectory)

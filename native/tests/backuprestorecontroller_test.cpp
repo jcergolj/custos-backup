@@ -25,6 +25,7 @@ public:
     QSemaphore release;
     bool blockList = false;
     bool blockInspect = false;
+    bool blockDownload = false;
 
     bool upload(const QString &source, const QString &path, QString *error) override { return local.upload(source, path, error); }
     bool ensureDirectory(const QString &path, QString *error) override { return local.ensureDirectory(path, error); }
@@ -33,6 +34,10 @@ public:
     bool download(const QString &path, const QString &destination, QString *error) override
     {
         downloadedPaths.append(path);
+        if (blockDownload) {
+            entered.release();
+            release.tryAcquire(1, 5000);
+        }
         return local.download(path, destination, error);
     }
     bool inspect(const QString &path, RemoteFile *file, QString *error) override
@@ -93,6 +98,7 @@ private slots:
     void rejectsEmptyDestination();
     void completesOnlyAfterAllSelectedFilesAreRestored_data();
     void completesOnlyAfterAllSelectedFilesAreRestored();
+    void restoresWithoutBlockingTheControllerThread();
     void browsesWithoutBlockingAndVerifiesOnlyTheSelectedCopy();
     void discoveryFailureClearsPreviousResultsAndAllowsRetry();
     void rejectsUnidentifiableCopies_data();
@@ -164,9 +170,11 @@ void BackupRestoreControllerTest::browsesWithoutBlockingAndVerifiesOnlyTheSelect
     changed.write("other");
     changed.close();
     controller.selectCopy(0);
-    QVERIFY(controller.entries().isEmpty());
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+    QVERIFY(controller.showingCachedData());
     QTRY_VERIFY(!controller.busy());
     QVERIFY(controller.entries().isEmpty());
+    QVERIFY(!controller.showingCachedData());
     QCOMPARE(controller.unavailableEntries(), QStringList {"nested/notes.txt"});
     QCOMPARE(provider.downloadedPaths.size(), 2);
     QCOMPARE(provider.inspectedPaths.size(), 2);
@@ -271,10 +279,52 @@ void BackupRestoreControllerTest::completesOnlyAfterAllSelectedFilesAreRestored(
         QVERIFY(QFile::remove(remote.filePath("two.txt")));
     }
     controller.restoreSelected({0, 1}, destination.path());
-    QVERIFY(QFile::exists(destination.filePath("one.txt")));
+    QTRY_VERIFY(!controller.busy());
     QCOMPARE(completed.count(), failSecondFile ? 0 : 1);
     QCOMPARE(failed.count(), failSecondFile ? 1 : 0);
     QCOMPARE(QFile::exists(destination.filePath("two.txt")), !failSecondFile);
+    QVERIFY(QFile::exists(destination.filePath("one.txt")));
+}
+
+void BackupRestoreControllerTest::restoresWithoutBlockingTheControllerThread()
+{
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QTemporaryDir metadata;
+    QVERIFY(remote.isValid());
+    QVERIFY(destination.isValid());
+    QVERIFY(metadata.isValid());
+    QFile file(remote.filePath("notes.txt"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("notes");
+    file.close();
+    QFile manifest(metadata.filePath("manifest.json"));
+    QVERIFY(manifest.open(QIODevice::WriteOnly));
+    manifest.write(R"({"version":1,"entries":[{"source":"/source/notes.txt","remote":"notes.txt","size":5,"sha256":"ab5aa97074c454a0632057e704220d9a6678fbf773a0a5806fc09b8173b07309"}]})");
+    manifest.close();
+
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    provider.blockDownload = true;
+    BackupRestoreController controller(engine, &provider);
+    controller.loadManifest(manifest.fileName());
+    QSignalSpy completed(&controller, &BackupRestoreController::restoreCompleted);
+    const auto unblock = qScopeGuard([&] { provider.release.release(10); });
+
+    controller.restoreSelected({0}, destination.path());
+    QVERIFY(controller.busy());
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    bool heartbeat = false;
+    QTimer::singleShot(0, &controller, [&] { heartbeat = true; });
+    QTRY_VERIFY(heartbeat);
+    QVERIFY(controller.busy());
+    QVERIFY(!QFile::exists(destination.filePath("notes.txt")));
+
+    provider.release.release();
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(completed.count(), 1);
+    QVERIFY(QFile::exists(destination.filePath("notes.txt")));
 }
 
 void BackupRestoreControllerTest::loadsAndRestoresSelectedEntry()
@@ -305,6 +355,7 @@ void BackupRestoreControllerTest::loadsAndRestoresSelectedEntry()
 
     QSignalSpy statusSpy(&controller, &BackupRestoreController::statusChanged);
     controller.restore(0, destination.path());
+    QTRY_VERIFY(!controller.busy());
     QVERIFY(!statusSpy.isEmpty());
 
     QFile restored(destination.filePath(QStringLiteral("notes.txt")));

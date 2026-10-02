@@ -147,6 +147,8 @@ QtObject {
     property QtObject restoreController: QtObject {
         property bool busy: false
         property string loadingMessage: ""
+        property bool showingCachedData: false
+        property bool restoreEligible: true
         property int currentCopyIndex: -1
         property int selectedCopy: -1
         property var entries: []
