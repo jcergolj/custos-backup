@@ -15,6 +15,7 @@
 #include <QScopedPointer>
 
 #include "../src/backuprestorecontroller.h"
+#include "../src/backupmanifest.h"
 #include "../src/localprovider.h"
 
 class RestoreTestProvider final : public BackupProvider
@@ -30,8 +31,25 @@ public:
     bool blockList = false;
     bool blockInspect = false;
     bool blockDownload = false;
+    bool injectInvalidFolders = true;
+    QString failedUploadPath;
+    bool leaveFailedPayload = false;
+    QStringList failedUploads;
 
-    bool upload(const QString &source, const QString &path, QString *error) override { return local.upload(source, path, error); }
+    bool upload(const QString &source, const QString &path, QString *error) override
+    {
+        if (path == failedUploadPath) {
+            failedUploads.append(path);
+            if (leaveFailedPayload && !local.upload(source, path, error)) {
+                return false;
+            }
+            if (error != nullptr) {
+                *error = QStringLiteral("Upload failed.");
+            }
+            return false;
+        }
+        return local.upload(source, path, error);
+    }
     bool ensureDirectory(const QString &path, QString *error) override { return local.ensureDirectory(path, error); }
     bool trash(const QString &path, QString *error) override { return local.trash(path, error); }
     bool permanentlyDelete(const QString &path, QString *error) override { return local.permanentlyDelete(path, error); }
@@ -63,9 +81,11 @@ public:
         if (!local.list(path, items, error)) {
             return false;
         }
-        // A provider response must not expand discovery beyond direct child folders.
-        items->append({"backups/other-computer/Other/copy", "copy", true, 0, {}});
-        items->append({path + "/copy/nested", "nested", true, 0, {}});
+        if (injectInvalidFolders) {
+            // A provider response must not expand discovery beyond direct child folders.
+            items->append({"backups/other-computer/Other/copy", "copy", true, 0, {}});
+            items->append({path + "/copy/nested", "nested", true, 0, {}});
+        }
         return true;
     }
 };
@@ -96,6 +116,8 @@ class BackupRestoreControllerTest final : public QObject
     Q_OBJECT
 
 private slots:
+    void restoresSurvivingFileAfterUploadFailure_data();
+    void restoresSurvivingFileAfterUploadFailure();
     void loadsAndRestoresSelectedEntry();
     void rejectsInvalidSelection();
     void clearsEntriesWhenManifestFailsToLoad();
@@ -114,6 +136,109 @@ private slots:
     void rejectsUnidentifiableCopies_data();
     void rejectsUnidentifiableCopies();
 };
+
+void BackupRestoreControllerTest::restoresSurvivingFileAfterUploadFailure_data()
+{
+    QTest::addColumn<bool>("leaveFailedPayload");
+    QTest::newRow("failed upload leaves no file") << false;
+    QTest::newRow("failed upload leaves remote payload") << true;
+}
+
+void BackupRestoreControllerTest::restoresSurvivingFileAfterUploadFailure()
+{
+    QFETCH(bool, leaveFailedPayload);
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+    QVERIFY(destination.isValid());
+    for (const QString &name : {QString("notes.txt"), QString("failed.txt")}) {
+        QFile file(source.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("notes"), qint64(5));
+    }
+
+    const QString folder = "backups/computer/Documents";
+    const QString copy = folder + "/copy";
+    const BackupCopyMetadata metadata {"computer", "set-id", "Documents", "copy", QDateTime::currentDateTimeUtc()};
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    provider.injectInvalidFolders = false;
+    provider.failedUploadPath = copy + "/failed.txt";
+    provider.leaveFailedPayload = leaveFailedPayload;
+    QString manifestPath;
+    QString error;
+    BackupResult result;
+    QVERIFY(!engine.backup({source.path()}, copy, {}, metadata, provider, &manifestPath, &error, {}, &result));
+    const auto cleanupManifest = qScopeGuard([&] {
+        if (!manifestPath.isEmpty()) {
+            QDir(QFileInfo(manifestPath).path()).removeRecursively();
+        }
+    });
+    QCOMPARE(provider.failedUploads, QStringList {copy + "/failed.txt"});
+    QVERIFY(result.manifestVerified);
+    QCOMPARE(result.verifiedFiles, qint64(1));
+    QCOMPARE(result.verifiedBytes, qint64(5));
+    QCOMPARE(result.issues.size(), 1);
+    QCOMPARE(result.issues.first().path, source.filePath("failed.txt"));
+    QCOMPARE(result.issues.first().phase, QStringLiteral("uploading"));
+    QCOMPARE(QFile::exists(remote.filePath(copy + "/failed.txt")), leaveFailedPayload);
+
+    QVector<BackupEntry> entries;
+    BackupManifestInfo info;
+    QVERIFY2(BackupManifest::load(manifestPath, &entries, &info, &error), qPrintable(error));
+    QCOMPARE(info.version, 2);
+    QCOMPARE(info.status, QStringLiteral("incomplete"));
+    QVERIFY(info.expectedItems.contains("notes.txt"));
+    QVERIFY(info.expectedItems.contains("failed.txt"));
+    QCOMPARE(info.failedItems, QStringList {"failed.txt"});
+    QCOMPARE(entries.size(), 1);
+    QCOMPARE(entries.first().restorePath, QStringLiteral("notes.txt"));
+
+    QVector<RemoteCopy> copies;
+    error.clear();
+    QVERIFY2(BackupCatalog::discover(provider, "backups", &copies, &error), qPrintable(error));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(copies.size(), 1);
+    QCOMPARE(copies.first().status, QStringLiteral("incomplete"));
+    QCOMPARE(copies.first().entries.size(), 1);
+    QCOMPARE(copies.first().entries.first().restorePath, QStringLiteral("notes.txt"));
+    QCOMPARE(copies.first().failedItems, QStringList {"failed.txt"});
+
+    BackupRestoreController controller(engine, &provider);
+    QSignalSpy failed(&controller, &BackupRestoreController::failed);
+    QSignalSpy completed(&controller, &BackupRestoreController::restoreCompleted);
+    controller.discover(folder, "set-id");
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.copies().size(), 1);
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(failed.isEmpty());
+    QVERIFY(controller.restoreEligible());
+    QCOMPARE(controller.entries(), QStringList {source.filePath("notes.txt")});
+    QCOMPARE(controller.unavailableEntries(), QStringList {"failed.txt"});
+    QVERIFY(controller.copies().first().contains("incomplete"));
+    QVERIFY(controller.copies().first().contains("some items unavailable"));
+
+    const int downloadsBeforeRestore = provider.downloadedPaths.size();
+    controller.restore(1, destination.path());
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.first().first().toString(), QStringLiteral("The selected restore file is invalid."));
+    QCOMPARE(provider.downloadedPaths.size(), downloadsBeforeRestore);
+    QVERIFY(!QFile::exists(destination.filePath("failed.txt")));
+
+    controller.restoreSelected({0}, destination.path());
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(completed.count(), 1);
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(provider.downloadedPaths.size(), downloadsBeforeRestore + 1);
+    QCOMPARE(provider.downloadedPaths.last(), copy + "/notes.txt");
+    QFile restored(destination.filePath("notes.txt"));
+    QVERIFY(restored.open(QIODevice::ReadOnly));
+    QCOMPARE(restored.readAll(), QByteArray("notes"));
+    QVERIFY(!QFile::exists(destination.filePath("failed.txt")));
+}
 
 void BackupRestoreControllerTest::qmlEligibilityTracksVerificationAndRestore_data()
 {

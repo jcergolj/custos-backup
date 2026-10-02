@@ -1,5 +1,8 @@
 #include <QFile>
 #include <QCryptographicHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -17,6 +20,8 @@ private slots:
     void acceptsAbsoluteRemotePaths();
     void rejectsCompleteCopyWithMissingExpectedEntry();
     void rejectsFailedEntryPresentedAsVerified();
+    void rejectsMalformedVersionTwoManifests_data();
+    void rejectsMalformedVersionTwoManifests();
     void rejectsMalformedEntries();
     void rejectsNullOutput();
     void restoresOnlyTheSelectedFile();
@@ -257,6 +262,49 @@ void BackupManifestTest::rejectsNullOutput()
     QString error;
     QVERIFY(!BackupManifest::load(QStringLiteral("/missing/manifest.json"), nullptr, &error));
     QCOMPARE(error, QStringLiteral("A destination for manifest entries is required."));
+}
+
+void BackupManifestTest::rejectsMalformedVersionTwoManifests_data()
+{
+    QTest::addColumn<QByteArray>("manifest");
+    const QJsonObject valid = QJsonDocument::fromJson(R"({"version":2,"application":"omacustos","computer":"computer","set_id":"set","copy_id":"copy","created_at":"2026-09-28T12:00:00.000Z","status":"incomplete","expected":["notes.txt","failed.txt"],"failed":["failed.txt"],"entries":[{"source":"/source/notes.txt","remote":"copy/notes.txt","restore":"notes.txt","size":5,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]})").object();
+    for (const QString &field : {QString("expected"), QString("failed"), QString("entries")}) {
+        QJsonObject root = valid;
+        QJsonArray items = root.value(field).toArray();
+        items.append(items.first());
+        root.insert(field, items);
+        QTest::newRow(qPrintable("duplicate " + field)) << QJsonDocument(root).toJson();
+    }
+    for (const QString &field : {QString("expected"), QString("failed")}) {
+        QJsonObject root = valid;
+        root.insert(field, QJsonArray {42});
+        QTest::newRow(qPrintable("non-string " + field)) << QJsonDocument(root).toJson();
+    }
+    QJsonObject root = valid;
+    root.insert("status", "complete");
+    QTest::newRow("complete copy with failed upload") << QJsonDocument(root).toJson();
+    root = valid;
+    root.insert("created_at", "invalid");
+    QTest::newRow("invalid timestamp") << QJsonDocument(root).toJson();
+    root = valid;
+    root.insert("entries", QJsonArray {42});
+    QTest::newRow("non-object entry") << QJsonDocument(root).toJson();
+}
+
+void BackupManifestTest::rejectsMalformedVersionTwoManifests()
+{
+    QFETCH(QByteArray, manifest);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QFile file(directory.filePath("manifest.json"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(manifest), qint64(manifest.size()));
+    file.close();
+
+    QVector<BackupEntry> entries;
+    QString error;
+    QVERIFY(!BackupManifest::load(file.fileName(), &entries, &error));
+    QVERIFY(!error.isEmpty());
 }
 
 QTEST_MAIN(BackupManifestTest)
