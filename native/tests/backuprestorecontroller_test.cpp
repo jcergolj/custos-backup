@@ -3,6 +3,9 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "../src/backuprestorecontroller.h"
 #include "../src/localprovider.h"
@@ -16,7 +19,53 @@ private slots:
     void rejectsInvalidSelection();
     void clearsEntriesWhenManifestFailsToLoad();
     void rejectsEmptyDestination();
+    void completesOnlyAfterAllSelectedFilesAreRestored_data();
+    void completesOnlyAfterAllSelectedFilesAreRestored();
 };
+
+void BackupRestoreControllerTest::completesOnlyAfterAllSelectedFilesAreRestored_data()
+{
+    QTest::addColumn<bool>("failSecondFile");
+    QTest::newRow("all files restored") << false;
+    QTest::newRow("second file fails") << true;
+}
+
+void BackupRestoreControllerTest::completesOnlyAfterAllSelectedFilesAreRestored()
+{
+    QFETCH(bool, failSecondFile);
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QTemporaryDir metadata;
+    QVERIFY(remote.isValid());
+    QVERIFY(destination.isValid());
+    QVERIFY(metadata.isValid());
+    QJsonArray entries;
+    for (const QString &name : {QString("one.txt"), QString("two.txt")}) {
+        QFile file(remote.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("notes");
+        entries.append(QJsonObject {{"source", "/source/" + name}, {"remote", name}, {"size", 5},
+            {"sha256", QString::fromLatin1(QCryptographicHash::hash("notes", QCryptographicHash::Sha256).toHex())}});
+    }
+    QFile manifest(metadata.filePath("manifest.json"));
+    QVERIFY(manifest.open(QIODevice::WriteOnly));
+    manifest.write(QJsonDocument(QJsonObject {{"version", 1}, {"entries", entries}}).toJson());
+    manifest.close();
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    controller.loadManifest(manifest.fileName());
+    QSignalSpy completed(&controller, &BackupRestoreController::restoreCompleted);
+    QSignalSpy failed(&controller, &BackupRestoreController::failed);
+    if (failSecondFile) {
+        QVERIFY(QFile::remove(remote.filePath("two.txt")));
+    }
+    controller.restoreSelected({0, 1}, destination.path());
+    QVERIFY(QFile::exists(destination.filePath("one.txt")));
+    QCOMPARE(completed.count(), failSecondFile ? 0 : 1);
+    QCOMPARE(failed.count(), failSecondFile ? 1 : 0);
+    QCOMPARE(QFile::exists(destination.filePath("two.txt")), !failSecondFile);
+}
 
 void BackupRestoreControllerTest::loadsAndRestoresSelectedEntry()
 {

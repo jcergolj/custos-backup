@@ -65,14 +65,27 @@ Each named backup set has its own files, exclusions, and schedule. Every run
 creates a separate copy. By default, copies are stored under `/my-files/backups`
 in Proton Drive, and the latest three verified successful copies are kept.
 
+**Recent backups** shows the latest run for each saved backup set, rather than
+a row for every copy. Use **Restore** to choose an older remote copy.
+
+While a backup runs, its row shows an estimated remaining time. New backups show
+**Estimating time remaining…** until enough progress is available; later runs can
+start with an estimate based on their previous successful run. Estimates update
+as files finish and may change with transfer speed. During final checks, the row
+shows **Finalizing backup…**.
+
 **Advanced settings** lets you change the remote folder and number of copies
 to keep, or run only on AC power.
 
 It also offers a **Resource usage (all backups)** setting:
 
+**Use system defaults** is enabled by default: no CPU cap, normal CPU priority,
+and normal I/O scheduling for the worker and its Proton CLI subprocesses.
+Uncheck it to opt into one of the five presets:
+
 | Preset | CPU quota | CPU priority (`nice`) | I/O priority |
 | --- | ---: | ---: | --- |
-| Very low (default) | 10% | 19 | Idle |
+| Very low | 10% | 19 | Idle |
 | Low | 25% | 15 | Idle |
 | Medium | 50% | 10 | Best effort |
 | High | 100% | 5 | Best effort |
@@ -81,8 +94,10 @@ It also offers a **Resource usage (all backups)** setting:
 Press **Save** to apply your choice to all manual and scheduled backups. New
 limits take effect when the next worker starts; a running backup keeps its
 current limits. A 100% quota allows one full CPU core, and 200% allows two.
-Lower `nice` values give the worker higher CPU priority. These limits affect the
-backup worker and its CLI processes, not the desktop interface.
+Lower `nice` values give the worker higher CPU priority. Tick **Use system
+defaults** and save to remove the custom limits again. These settings apply to
+the backup worker and its CLI processes; the desktop interface uses normal
+system scheduling.
 
 Schedules can be daily, weekly, or monthly. If a monthly day does not exist in
 the current month, the last day of that month is used.
@@ -140,6 +155,9 @@ files, Proton login, and this computer's global resource preset are not included
    full path.
 5. Press **Start restore** at the bottom. The button is available only after
    ticking at least one file and specifying the destination folder.
+
+After a successful restore, the restore panel closes and Custos returns to the
+dashboard. If a restore fails, the panel and your selection stay open for retry.
 
 Incomplete copies expose only verified entries. Missing, failed, malformed, or
 unverifiable items are not presented as successful restores.

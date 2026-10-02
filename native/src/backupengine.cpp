@@ -11,6 +11,7 @@
 #include <QSet>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QScopeGuard>
 #include <QUuid>
 
 #include <algorithm>
@@ -233,7 +234,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     return backup(sourceDirectories, remoteRoot, exclusions, {}, provider, manifestPath, error);
 }
 
-bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error) const
+bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error, const std::function<void(const BackupProgress &)> &reportProgress) const
 {
     if (error != nullptr) {
         error->clear();
@@ -255,6 +256,18 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         }
 
         return false;
+    }
+
+    BackupProgress progress;
+    progress.totalFiles = selection.includedFiles.size();
+    QHash<QString, qint64> plannedSizes;
+    for (const QString &path : selection.includedFiles) {
+        const qint64 size = qMax(qint64(0), QFileInfo(path).size());
+        plannedSizes.insert(path, size);
+        progress.totalBytes += size;
+    }
+    if (reportProgress) {
+        reportProgress(progress);
     }
 
     QJsonArray entries;
@@ -283,6 +296,15 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
 
     for (const QString &sourcePath : selection.includedFiles) {
+        // Count attempted files, including failures, without presenting those
+        // failures as verified uploads. This measures remaining work only.
+        const auto finishedFile = qScopeGuard([&] {
+            ++progress.processedFiles;
+            progress.processedBytes += plannedSizes.value(sourcePath);
+            if (reportProgress) {
+                reportProgress(progress);
+            }
+        });
         int sourceIndex = 0;
         for (int index = 0; index < sourceDirectories.size(); ++index) {
             if (isWithinPath(sourcePath, cleanAbsolutePath(sourceDirectories.at(index)))) {
@@ -362,6 +384,10 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         });
     }
 
+    progress.finalizing = true;
+    if (reportProgress) {
+        reportProgress(progress);
+    }
     const QString manifestDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath(
         QStringLiteral("custos-manifest-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!QDir().mkpath(manifestDirectory)

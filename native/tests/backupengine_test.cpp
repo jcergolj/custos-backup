@@ -25,7 +25,59 @@ private slots:
     void preservesVerifiedItemsInAnIncompleteCopy();
     void reusesAnExistingVerifiedCopyOnRetry();
     void localProviderRejectsUnsafePaths();
+    void reportsProgressForIncludedFilesAndFinalization_data();
+    void reportsProgressForIncludedFilesAndFinalization();
 };
+
+void BackupEngineTest::reportsProgressForIncludedFilesAndFinalization_data()
+{
+    QTest::addColumn<bool>("removeFile");
+    QTest::newRow("successful files") << false;
+    QTest::newRow("file becomes unreadable") << true;
+}
+
+void BackupEngineTest::reportsProgressForIncludedFilesAndFinalization()
+{
+    QFETCH(bool, removeFile);
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+    for (const auto &name : {"one", "two", "three", "excluded"}) {
+        QFile file(source.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(name == QByteArray("excluded") ? QByteArray(100, 'x') : QByteArray(10, 'x'));
+    }
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    QVector<BackupProgress> updates;
+    QString error;
+    QString manifest;
+    const bool success = engine.backup({source.path()}, "copy", {source.filePath("excluded")}, {},
+        provider, &manifest, &error, [&](const BackupProgress &progress) {
+            if (updates.isEmpty() && removeFile) {
+                QVERIFY(QFile::remove(source.filePath("one")));
+            }
+            if (progress.finalizing) {
+                QVERIFY(!QFile::exists(remote.filePath("copy/manifest.json")));
+            }
+            updates.append(progress);
+        });
+    QCOMPARE(success, !removeFile);
+    QCOMPARE(updates.size(), 5);
+    QCOMPARE(updates.first().totalFiles, 3);
+    QCOMPARE(updates.first().totalBytes, qint64(30));
+    QCOMPARE(updates.first().processedFiles, 0);
+    for (int index = 1; index <= 3; ++index) {
+        QCOMPARE(updates.at(index).processedFiles, index);
+        QCOMPARE(updates.at(index).processedBytes, qint64(index * 10));
+        QVERIFY(!updates.at(index).finalizing);
+    }
+    QVERIFY(updates.last().finalizing);
+    QVector<BackupEntry> verified;
+    QVERIFY(BackupManifest::load(manifest, &verified));
+    QCOMPARE(verified.size(), removeFile ? 2 : 3);
+}
 
 void BackupEngineTest::rejectsMissingSource()
 {

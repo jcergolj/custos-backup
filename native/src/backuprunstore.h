@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QString>
 #include <QVector>
+#include "backupprogress.h"
 
 struct BackupRunRecord {
     QString setId;
@@ -17,6 +18,15 @@ struct BackupRunRecord {
     QDateTime lastSuccess;
     QDateTime lastFailure;
     QString remoteCopyPath;
+    BackupProgress progress;
+    qint64 progressElapsedMs = 0;
+    QDateTime progressUpdatedAt;
+    qint64 lastSuccessfulElapsedMs = 0;
+    qint64 lastSuccessfulBytes = 0;
+    int lastSuccessfulFiles = 0;
+
+    // -1 means insufficient progress; zero means the estimate has elapsed.
+    qint64 estimatedRemainingSeconds(const QDateTime &now) const;
 };
 
 class BackupRunStore final

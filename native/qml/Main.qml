@@ -64,6 +64,13 @@ ApplicationWindow {
         linkVisited: root.accentColor
     }
 
+    component ActionButton: Button {
+        font.family: root.bodyFontFamily
+        font.pixelSize: root.bodyTypeSize
+        font.weight: Font.Normal
+        Layout.preferredHeight: 36
+    }
+
     ListModel {
         id: sourceModel
     }
@@ -91,7 +98,8 @@ ApplicationWindow {
         scheduleDay.value = backupSetController.currentScheduleDayOfMonth
         retentionSpin.value = backupSetController.currentRetention
         acPowerCheck.checked = backupSetController.currentOnlyOnAcPower
-        resourcePreset.currentIndex = resourceUsage.presetIndex
+        systemResourceDefaults.checked = resourceUsage.presetIndex < 0
+        resourcePreset.currentIndex = Math.max(0, resourceUsage.presetIndex)
     }
 
     function localPath(url) {
@@ -340,7 +348,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
             }
 
-            Button {
+            ActionButton {
                 objectName: "protonSignInButton"
                 text: protonAuth.checking ? qsTr("Checking Proton…") : qsTr("Sign in to Proton")
                 visible: !protonAuth.authenticated
@@ -351,7 +359,7 @@ ApplicationWindow {
                 onClicked: protonAuth.signIn()
             }
 
-            Button {
+            ActionButton {
                 objectName: "protonAuthRetryButton"
                 text: qsTr("↻")
                 visible: protonAuth.checked && !protonAuth.authenticated
@@ -363,7 +371,7 @@ ApplicationWindow {
                 onClicked: protonAuth.refresh()
             }
 
-            Button {
+            ActionButton {
                 objectName: "importSetsButton"
                 text: qsTr("Import")
                 Layout.preferredHeight: 36
@@ -373,7 +381,7 @@ ApplicationWindow {
                 onClicked: importSetsDialog.open()
             }
 
-            Button {
+            ActionButton {
                 objectName: "exportSetsButton"
                 text: qsTr("Export")
                 Layout.preferredHeight: 36
@@ -399,7 +407,7 @@ ApplicationWindow {
                 wrapMode: Text.WordWrap
             }
 
-            Button {
+            ActionButton {
                 objectName: "enableSchedulingButton"
                 text: qsTr("Enable scheduling")
                 visible: backupScheduler.hasSchedules && !backupScheduler.ready
@@ -407,7 +415,7 @@ ApplicationWindow {
                 onClicked: backupScheduler.enable()
             }
 
-            Button {
+            ActionButton {
                 objectName: "checkSchedulingButton"
                 text: qsTr("↻")
                 enabled: !backupScheduler.busy
@@ -436,6 +444,7 @@ ApplicationWindow {
             Layout.fillHeight: true
 
             ScrollView {
+                id: dashboardScrollView
                 objectName: "dashboardScrollView"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -475,10 +484,9 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                 }
 
-                                Button {
+                                ActionButton {
                                     objectName: "newBackupSetButton"
                                     text: "+"
-                                    font.pixelSize: 20
                                     Layout.preferredWidth: 36
                                     Layout.preferredHeight: 36
                                     Accessible.name: qsTr("New backup set")
@@ -513,7 +521,7 @@ ApplicationWindow {
                                     required property string modelData
                                     readonly property bool runActive: backupSetController.runningSetIds.indexOf(backupSetController.setIds[index]) >= 0
                                     width: dashboardSetsList.width
-                                    implicitHeight: Math.max(80, setNameLabel.implicitHeight + 32)
+                                    implicitHeight: Math.max(80, setSummary.implicitHeight + 32)
                                     padding: 16
                                     background: Rectangle {
                                         color: root.backgroundColor
@@ -525,14 +533,33 @@ ApplicationWindow {
                                         anchors.fill: parent
                                         spacing: 12
 
-                                        Label {
-                                            id: setNameLabel
-                                            text: setRow.modelData
-                                            font.pixelSize: root.bodyTypeSize
-                                            font.weight: Font.DemiBold
-                                            elide: Text.ElideRight
+                                        ColumnLayout {
+                                            id: setSummary
                                             Layout.fillWidth: true
                                             Layout.minimumWidth: 0
+                                            spacing: 4
+
+                                            Label {
+                                                id: setNameLabel
+                                                text: setRow.modelData
+                                                font.pixelSize: root.bodyTypeSize
+                                                font.weight: Font.DemiBold
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                                Layout.minimumWidth: 0
+                                            }
+
+                                            Label {
+                                                objectName: "setRemainingTime-" + setRow.index
+                                                text: backupSetController.remainingTimes[backupSetController.setIds[setRow.index]]
+                                                    || qsTr("Estimating time remaining…")
+                                                visible: setRow.runActive
+                                                font.pixelSize: root.metadataTypeSize
+                                                color: root.mutedColor
+                                                wrapMode: Text.WordWrap
+                                                Layout.fillWidth: true
+                                                Layout.minimumWidth: 0
+                                            }
                                         }
 
                                         BusyIndicator {
@@ -543,20 +570,11 @@ ApplicationWindow {
                                             Layout.preferredHeight: 24
                                         }
 
-                                        Label {
-                                            text: qsTr("Running")
-                                            visible: setRow.runActive
-                                            font.pixelSize: root.metadataTypeSize
-                                            color: root.mutedColor
-                                        }
-
-                                        ToolButton {
+                                        ActionButton {
                                             id: overflowButton
                                             objectName: "setActions-" + setRow.index
                                             text: "⋯"
-                                            font.pixelSize: 24
                                             Layout.preferredWidth: 40
-                                            Layout.preferredHeight: 40
                                             Accessible.name: qsTr("Actions for %1").arg(setRow.modelData)
                                             ToolTip.visible: hovered
                                             ToolTip.text: Accessible.name
@@ -668,12 +686,9 @@ ApplicationWindow {
                                             HoverHandler { id: recentSummaryHover }
                                         }
 
-                                        ToolButton {
+                                        ActionButton {
                                             objectName: "openFolder-" + recentRow.index
                                             text: "↗"
-                                            font.pixelSize: 20
-                                            palette.buttonText: root.accentColor
-                                            palette.disabled.buttonText: root.mutedColor
                                             Layout.preferredWidth: 36
                                             Layout.preferredHeight: 36
                                             Accessible.name: qsTr("Open %1 in Proton Drive")
@@ -685,7 +700,7 @@ ApplicationWindow {
                                             onClicked: root.openRecentBackupFolder(recentRow.index)
                                         }
 
-                                        Button {
+                                        ActionButton {
                                             objectName: "restore-" + recentRow.index
                                             text: qsTr("Restore")
                                             Layout.preferredHeight: 36
@@ -694,11 +709,10 @@ ApplicationWindow {
                                             onClicked: root.restoreRecentBackup(recentRow.index)
                                         }
 
-                                        ToolButton {
+                                        ActionButton {
                                             id: recentActionsButton
                                             objectName: "recentActions-" + recentRow.index
                                             text: "⋯"
-                                            font.pixelSize: 24
                                             Layout.preferredWidth: 36
                                             Layout.preferredHeight: 36
                                             Accessible.name: qsTr("Recent backup actions")
@@ -858,7 +872,7 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                 }
 
-                                Button {
+                                ActionButton {
                                     objectName: "chooseRestoreDestinationButton"
                                     text: qsTr("Choose folder…")
                                     onClicked: restoreDestinationDialog.open()
@@ -880,7 +894,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                             }
 
-                            Button {
+                            ActionButton {
                                 objectName: "startRestoreButton"
                                 text: qsTr("Start restore")
                                 Layout.alignment: Qt.AlignRight
@@ -911,10 +925,9 @@ ApplicationWindow {
 
                         Item { Layout.fillWidth: true }
 
-                        Button {
+                        ActionButton {
                             objectName: "closeEditorButton"
                             text: "×"
-                            font.pixelSize: 20
                             Layout.preferredWidth: 36
                             Layout.preferredHeight: 36
                             Accessible.name: qsTr("Close editor")
@@ -951,11 +964,10 @@ ApplicationWindow {
                     Layout.minimumWidth: 0
                 }
 
-                Button {
+                ActionButton {
                     id: addSourceButton
                     objectName: "addSourceButton"
                     text: "+"
-                    font.pixelSize: 20
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Add a source file or folder")
                     onClicked: sourceMenu.open()
@@ -1032,9 +1044,8 @@ ApplicationWindow {
                         }
                     }
 
-                    Button {
+                    ActionButton {
                         text: "-"
-                        font.pixelSize: 20
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Remove this source")
                         onClicked: sourceModel.remove(index)
@@ -1053,11 +1064,10 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
 
-                Button {
+                ActionButton {
                     id: addExclusionButton
                     objectName: "addExclusionButton"
                     text: "+"
-                    font.pixelSize: 20
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Exclude a file or folder")
                     onClicked: exclusionMenu.open()
@@ -1185,7 +1195,7 @@ ApplicationWindow {
                 font.pixelSize: root.metadataTypeSize
             }
 
-            Button {
+            ActionButton {
                 objectName: "advancedSettingsButton"
                 text: qsTr("Advanced settings")
                 checkable: true
@@ -1250,18 +1260,27 @@ ApplicationWindow {
                         color: root.accentColor
                     }
 
+                    CheckBox {
+                        id: systemResourceDefaults
+                        objectName: "useSystemResourceDefaults"
+                        text: qsTr("Use system defaults")
+                        enabled: !resourceUsage.busy
+                    }
+
                     ComboBox {
                         id: resourcePreset
                         objectName: "resourceUsagePreset"
                         model: resourceUsage.names
-                        enabled: !resourceUsage.busy
+                        enabled: !resourceUsage.busy && !systemResourceDefaults.checked
                         Layout.fillWidth: true
                         Accessible.name: qsTr("Backup resource usage")
                     }
 
                     Label {
                         objectName: "resourceUsageDescription"
-                        text: resourceUsage.descriptions[resourcePreset.currentIndex] || ""
+                        text: systemResourceDefaults.checked
+                            ? qsTr("No CPU cap · Normal CPU priority · Normal I/O scheduling")
+                            : resourceUsage.descriptions[resourcePreset.currentIndex] || ""
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -1317,7 +1336,7 @@ ApplicationWindow {
                 }
             }
 
-            Button {
+            ActionButton {
                 text: qsTr("Confirm proposed cleanup")
                 visible: backupSetController.cleanupConfirmationRequired
                 onClicked: backupSetController.confirmCleanup()
@@ -1328,19 +1347,19 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.bottomMargin: root.contentPadding
 
-                Button {
+                ActionButton {
                     objectName: "saveBackupSetButton"
                     text: qsTr("Save")
                     enabled: !resourceUsage.busy
                     onClicked: {
                         syncCurrentSet()
                         if (backupSetController.save()) {
-                            resourceUsage.save(resourcePreset.currentIndex)
+                            resourceUsage.save(systemResourceDefaults.checked ? -1 : resourcePreset.currentIndex)
                         }
                     }
                 }
 
-                Button {
+                ActionButton {
                     objectName: "previewBackupSetButton"
                     text: qsTr("Preview")
                     onClicked: {
@@ -1357,10 +1376,14 @@ ApplicationWindow {
                 }
 
                 Label {
-                    text: qsTr("Backup in progress...")
+                    text: qsTr("Backup in progress… %1").arg(
+                        backupSetController.remainingTimes[backupSetController.currentId]
+                            || qsTr("Estimating time remaining…"))
                     font.pixelSize: root.metadataTypeSize
                     color: root.accentColor
                     visible: root.backupRunning
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
             }
 
@@ -1385,7 +1408,10 @@ ApplicationWindow {
 
     Connections {
         target: resourceUsage
-        function onPresetChanged() { resourcePreset.currentIndex = resourceUsage.presetIndex }
+        function onPresetChanged() {
+            systemResourceDefaults.checked = resourceUsage.presetIndex < 0
+            resourcePreset.currentIndex = Math.max(0, resourceUsage.presetIndex)
+        }
         function onStatusChanged(message) { root.setStatus(message) }
         function onFailed(error) { root.setStatus(error) }
     }
@@ -1443,6 +1469,12 @@ ApplicationWindow {
 
     Connections {
         target: restoreController
+        function onRestoreCompleted() {
+            root.showRestore = false
+            root.selectedRestoreIndexes = []
+            destinationField.text = ""
+            dashboardScrollView.contentItem.contentY = 0
+        }
         function onEntriesChanged() { root.selectedRestoreIndexes = [] }
         function onCopiesChanged() { remoteCopySelector.currentIndex = -1 }
         function onStatusChanged(status) { root.setStatus(status) }

@@ -27,7 +27,43 @@ private slots:
     void exportCannotOverwriteLocalState();
     void importIsBlockedWhileWorkerRuns();
     void successfulSaveNotifiesSchedulingButPreviewAndFailedSaveDoNot();
+    void remainingTimeIsReportedForTheRunningSetOnly();
 };
+
+void BackupSetControllerTest::remainingTimeIsReportedForTheRunningSetOnly()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    const QString configPath = home.filePath("settings.json");
+    BackupConfig config;
+    config.sets = {{"documents", "Documents", "/my-files/backups", {"/safe/documents"}, {}},
+                   {"photos", "Photos", "/my-files/backups", {"/safe/photos"}, {}}};
+    QVERIFY(BackupConfigStore(configPath).save(config));
+    BackupRunStore runs(home.filePath("custos-backup-runs.json"));
+    runs.ensureSet("documents");
+    auto &record = *runs.find("documents");
+    runs.markRunning(record);
+    QVERIFY(runs.save());
+    BackupEngine engine;
+    BackupSetController controller(engine, configPath);
+    controller.setCurrentIndex(1);
+    QCOMPARE(controller.remainingTimes().value("documents").toString(), QString("Estimating time remaining…"));
+    QVERIFY(!controller.remainingTimes().contains("photos"));
+    record.progress = {4000, 1000, 4, 1, false};
+    record.progressElapsedMs = 10000;
+    record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QVERIFY(controller.remainingTimes().value("documents").toString().startsWith("Est. remaining: 00:"));
+    record.progress.finalizing = true;
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QCOMPARE(controller.remainingTimes().value("documents").toString(), QString("Finalizing backup…"));
+    runs.markSuccess(record, QDateTime::currentDateTimeUtc());
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QVERIFY(controller.remainingTimes().isEmpty());
+}
 
 void BackupSetControllerTest::successfulSaveNotifiesSchedulingButPreviewAndFailedSaveDoNot()
 {

@@ -34,7 +34,7 @@ ResourceUsage::ResourceUsage(QString serviceDirectory, QString systemctl, QObjec
     QFile file(dropInPath);
     if (file.open(QIODevice::ReadOnly)) {
         const QByteArray data = file.readAll();
-        for (int index = 0; index < int(presets.size()); ++index) {
+        for (int index = -1; index < int(presets.size()); ++index) {
             if (data == contents(index)) {
                 savedIndex = index;
                 break;
@@ -93,6 +93,12 @@ QStringList ResourceUsage::descriptions() const
 
 QByteArray ResourceUsage::contents(int index)
 {
+    if (index == -1) {
+        // Explicitly clear the quota and reset scheduling when opting out, even
+        // if a service from an older installation still contains low limits.
+        return QByteArray("# Managed by Custos Backup: system-defaults\n[Service]\n"
+                          "CPUQuota=\nNice=0\nIOSchedulingClass=none\nIOSchedulingPriority=0\n");
+    }
     const auto &preset = presets.at(index);
     return QStringLiteral("# Managed by Custos Backup: %1\n[Service]\nCPUQuota=%2%\nNice=%3\n"
                           "IOSchedulingClass=%4\nIOSchedulingPriority=%5\n")
@@ -112,7 +118,7 @@ void ResourceUsage::save(int index)
     if (applying) {
         return;
     }
-    if (index < 0 || index >= int(presets.size())) {
+    if (index < -1 || index >= int(presets.size())) {
         emit failed(tr("Choose a valid resource usage preset."));
         return;
     }
@@ -127,7 +133,7 @@ void ResourceUsage::save(int index)
         previousContents = previous.readAll();
         previous.close();
     }
-    if (index == savedIndex && ((!hadPreviousFile && index == 0) || previousContents == contents(index))) {
+    if (index == savedIndex && ((!hadPreviousFile && index == -1) || previousContents == contents(index))) {
         return;
     }
     if (!QDir().mkpath(QFileInfo(dropInPath).absolutePath()) || !write(contents(index))) {

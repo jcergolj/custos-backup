@@ -32,6 +32,7 @@ class BackupSetController final : public QObject
     Q_PROPERTY(QString currentRunStatus READ currentRunStatus NOTIFY runStateChanged)
     Q_PROPERTY(QString currentRunError READ currentRunError NOTIFY runStateChanged)
     Q_PROPERTY(QStringList runningSetIds READ runningSetIds NOTIFY dashboardChanged)
+    Q_PROPERTY(QVariantMap remainingTimes READ remainingTimes NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackups READ recentBackups NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackupSetIds READ recentBackupSetIds NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackupTimestamps READ recentBackupTimestamps NOTIFY dashboardChanged)
@@ -76,6 +77,7 @@ public:
     QString currentRunStatus() const;
     QString currentRunError() const;
     QStringList runningSetIds() const;
+    QVariantMap remainingTimes() const;
     QStringList recentBackups() const;
     QStringList recentBackupSetIds() const;
     QStringList recentBackupTimestamps() const;

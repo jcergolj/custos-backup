@@ -182,6 +182,7 @@ void BackupRestoreController::restore(int index, const QString &destinationDirec
     }
 
     emit statusChanged(QStringLiteral("File restored successfully."));
+    emit restoreCompleted();
 }
 
 void BackupRestoreController::restoreSelected(const QVariantList &indexes, const QString &destinationDirectory)
@@ -203,6 +204,7 @@ void BackupRestoreController::restoreSelected(const QVariantList &indexes, const
         }
     }
     emit statusChanged(QStringLiteral("%1 files restored successfully.").arg(indexes.size()));
+    emit restoreCompleted();
 }
 
 void BackupRestoreController::restoreFolder(const QString &folder, const QString &destinationDirectory)

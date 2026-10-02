@@ -12,6 +12,7 @@
 #include <QCommandLineParser>
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QLockFile>
 #include <QSysInfo>
@@ -158,7 +159,25 @@ int main(int argc, char *argv[])
             copy,
             QDateTime::currentDateTimeUtc(),
         };
-        if (engine.backup(setIterator->sourceDirectories, copyRoot, setIterator->exclusions, metadata, provider, &manifestPath, &error)) {
+        QElapsedTimer progressClock;
+        QElapsedTimer progressSaveClock;
+        progressClock.start();
+        progressSaveClock.start();
+        const auto reportProgress = [&](const BackupProgress &progress) {
+            record.progress = progress;
+            record.progressElapsedMs = progressClock.elapsed();
+            record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
+            if (progress.processedFiles <= 1 || progress.finalizing
+                || progress.processedFiles == progress.totalFiles || progressSaveClock.elapsed() >= 1000) {
+                QString progressError;
+                if (!runStore.save(&progressError)) {
+                    qWarning().noquote() << QStringLiteral("Unable to update backup progress:") << progressError;
+                }
+                progressSaveClock.restart();
+            }
+        };
+        if (engine.backup(setIterator->sourceDirectories, copyRoot, setIterator->exclusions, metadata, provider, &manifestPath, &error, reportProgress)) {
+            record.progressElapsedMs = progressClock.elapsed();
             runStore.markSuccess(record, QDateTime::currentDateTime());
             qInfo().noquote() << setIterator->name << manifestPath;
 

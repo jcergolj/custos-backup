@@ -17,6 +17,43 @@ class ResourceUsageTest final : public QObject
     }
 
 private slots:
+    void systemDefaultsAreUsedUnlessAPresetIsExplicitlySelected()
+    {
+        QTemporaryDir home;
+        QVERIFY(home.isValid());
+        ResourceUsage resources(home.path(), home.filePath("missing"));
+        QSignalSpy errors(&resources, &ResourceUsage::failed);
+        QCOMPARE(resources.presetIndex(), -1);
+        resources.save(-1);
+        QVERIFY(!resources.busy());
+        QVERIFY(errors.isEmpty());
+        QVERIFY(!QFile::exists(home.filePath("custos.service.d/50-custos-resources.conf")));
+    }
+
+    void returningToSystemDefaultsRemovesLimitsAndPersistsTheChoice()
+    {
+        QTemporaryDir home;
+        QVERIFY(home.isValid());
+        const QString systemctl = home.filePath("systemctl");
+        QVERIFY(script(systemctl, "#!/bin/sh\nexit 0\n"));
+        ResourceUsage resources(home.path(), systemctl);
+        resources.save(0);
+        QTRY_VERIFY(!resources.busy());
+        QCOMPARE(resources.presetIndex(), 0);
+        resources.save(-1);
+        QTRY_VERIFY(!resources.busy());
+        QCOMPARE(resources.presetIndex(), -1);
+        QFile dropIn(home.filePath("custos.service.d/50-custos-resources.conf"));
+        QVERIFY(dropIn.open(QIODevice::ReadOnly));
+        const QByteArray contents = dropIn.readAll();
+        QVERIFY(contents.contains("CPUQuota=\n"));
+        QVERIFY(contents.contains("Nice=0\n"));
+        QVERIFY(contents.contains("IOSchedulingClass=none\n"));
+        QVERIFY(contents.contains("IOSchedulingPriority=0\n"));
+        ResourceUsage reopened(home.path(), systemctl);
+        QCOMPARE(reopened.presetIndex(), -1);
+    }
+
     void savesAndReloadsEachPreset_data()
     {
         QTest::addColumn<int>("index");
@@ -42,9 +79,9 @@ private slots:
         QVERIFY(script(systemctl, "#!/bin/sh\n[ \"$*\" = '--user daemon-reload' ] || exit 2\nexit 0\n"));
         ResourceUsage resources(home.path(), systemctl);
         QCOMPARE(resources.names(), QStringList({"Very low", "Low", "Medium", "High", "Very high"}));
-        QCOMPARE(resources.presetIndex(), 0);
+        QCOMPARE(resources.presetIndex(), -1);
         QSignalSpy errors(&resources, &ResourceUsage::failed);
-        // Save another profile first so the default is also exercised as a change.
+        // Exercise changing between explicit profiles as well as opting in.
         resources.save(index == 4 ? 3 : 4);
         QTRY_VERIFY(!resources.busy());
         resources.save(index);
@@ -69,15 +106,18 @@ private slots:
     {
         QTest::addColumn<bool>("existing");
         QTest::addColumn<bool>("missingSystemctl");
-        QTest::newRow("new file") << false << false;
-        QTest::newRow("existing file") << true << false;
-        QTest::newRow("missing systemctl") << true << true;
+        QTest::addColumn<int>("targetIndex");
+        QTest::newRow("new file") << false << false << 4;
+        QTest::newRow("existing file") << true << false << 4;
+        QTest::newRow("missing systemctl") << true << true << 4;
+        QTest::newRow("return to system defaults") << true << false << -1;
     }
 
     void failedReloadRestoresPreviousSettings()
     {
         QFETCH(bool, existing);
         QFETCH(bool, missingSystemctl);
+        QFETCH(int, targetIndex);
         QTemporaryDir home;
         QVERIFY(home.isValid());
         const QString systemctl = home.filePath("systemctl");
@@ -97,7 +137,7 @@ private slots:
         ResourceUsage resources(home.path(), missingSystemctl ? home.filePath("missing") : systemctl);
         const int original = resources.presetIndex();
         QSignalSpy errors(&resources, &ResourceUsage::failed);
-        resources.save(4);
+        resources.save(targetIndex);
         QTRY_VERIFY(!resources.busy());
         QCOMPARE(resources.presetIndex(), original);
         QCOMPARE(errors.count(), 1);
@@ -116,10 +156,10 @@ private slots:
         QVERIFY(home.isValid());
         ResourceUsage resources(home.path(), home.filePath("missing"));
         QSignalSpy errors(&resources, &ResourceUsage::failed);
-        resources.save(-1);
+        resources.save(-2);
         resources.save(5);
         QCOMPARE(errors.count(), 2);
-        QCOMPARE(resources.presetIndex(), 0);
+        QCOMPARE(resources.presetIndex(), -1);
         QVERIFY(!QFile::exists(home.filePath("custos.service.d/50-custos-resources.conf")));
     }
 };

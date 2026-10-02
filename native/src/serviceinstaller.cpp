@@ -53,9 +53,6 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
         "[Service]\n"
         "Type=oneshot\n"
         "ExecStart=%1 --config %2/.config/custos/custos-backup.json\n"
-        "Nice=19\n"
-        "CPUQuota=10%\n"
-        "IOSchedulingClass=idle\n"
         "NoNewPrivileges=true\n"
     ).arg(workerPath, QStringLiteral("%h")).toUtf8();
 

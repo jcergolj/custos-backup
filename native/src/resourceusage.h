@@ -21,6 +21,7 @@ public:
     ~ResourceUsage() override;
     QStringList names() const;
     QStringList descriptions() const;
+    // -1 means normal system defaults; 0–4 are explicit resource presets.
     int presetIndex() const { return savedIndex; }
     bool busy() const { return applying; }
     Q_INVOKABLE void save(int index);
@@ -39,8 +40,8 @@ private:
     QString systemctl;
     QProcess reload;
     QTimer timeout;
-    int savedIndex = 0;
-    int pendingIndex = 0;
+    int savedIndex = -1;
+    int pendingIndex = -1;
     bool applying = false;
     bool hadPreviousFile = false;
     bool timedOut = false;

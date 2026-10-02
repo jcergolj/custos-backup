@@ -18,9 +18,9 @@ QtObject {
     property QtObject resourceUsage: QtObject {
         property var names: ["Very low", "Low", "Medium", "High", "Very high"]
         property var descriptions: ["CPU limit: 10%", "CPU limit: 25%", "CPU limit: 50%", "CPU limit: 100%", "CPU limit: 200%"]
-        property int presetIndex: 0
+        property int presetIndex: -1
         property bool busy: false
-        property int savedIndex: -1
+        property int savedIndex: -2
         signal presetChanged()
         signal statusChanged(string message)
         signal failed(string error)
@@ -69,6 +69,7 @@ QtObject {
         property string currentRunStatus: "idle"
         property string currentRunError: ""
         property var runningSetIds: []
+        property var remainingTimes: ({})
         property var recentBackups: ["Photos\nNo backup run yet", "Documents\nsucceeded"]
         property var recentBackupSetIds: ["photos-id", "documents-id"]
         property var recentBackupTimestamps: ["", "01/10/2026 10:00:00"]
@@ -152,14 +153,21 @@ QtObject {
         property var restoredIndexes: []
         property string restoreDestination: ""
         property int restoreCount: 0
+        property bool restoreSucceeds: true
         signal statusChanged(string status)
         signal failed(string error)
+        signal restoreCompleted()
         function discover(remoteRoot) { discoveredRoot = remoteRoot }
         function selectCopy(index) {}
         function restoreSelected(indexes, destination) {
             restoredIndexes = indexes.slice()
             restoreDestination = destination
             restoreCount++
+            if (restoreSucceeds) {
+                restoreCompleted()
+            } else {
+                failed("Restore failed")
+            }
         }
         function restoreFolder(folder, destination) {}
     }

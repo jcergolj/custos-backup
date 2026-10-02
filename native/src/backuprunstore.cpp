@@ -6,6 +6,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <cmath>
+#include <limits>
 
 namespace {
 
@@ -21,6 +23,49 @@ void writeDate(QJsonObject &object, const QString &key, const QDateTime &value)
     }
 }
 
+}
+
+qint64 BackupRunRecord::estimatedRemainingSeconds(const QDateTime &now) const
+{
+    if (status != QStringLiteral("running") || progress.finalizing
+        || progress.totalFiles <= 0 || progress.processedFiles < 0
+        || progress.processedFiles >= progress.totalFiles
+        || progressElapsedMs < 0 || !progressUpdatedAt.isValid() || !now.isValid()
+        || now < progressUpdatedAt || progress.processedBytes < 0
+        || progress.totalBytes < progress.processedBytes) {
+        return -1;
+    }
+    double estimateMs;
+    if (progress.processedFiles > 0) {
+        if (progressElapsedMs == 0 || (progress.totalBytes > 0 && progress.processedBytes == 0)) {
+            return -1;
+        }
+        double remainingRatio = double(progress.totalFiles - progress.processedFiles) / progress.processedFiles;
+        if (progress.processedBytes > 0) {
+            remainingRatio = qMax(remainingRatio,
+                double(progress.totalBytes - progress.processedBytes) / progress.processedBytes);
+        }
+        estimateMs = remainingRatio * progressElapsedMs;
+    } else {
+        // Previous successful runs can provide an initial estimate, including
+        // single-file backups that cannot report progress until upload finishes.
+        if (lastSuccessfulElapsedMs <= 0 || lastSuccessfulFiles <= 0
+            || (progress.totalBytes > 0 && lastSuccessfulBytes <= 0)) {
+            return -1;
+        }
+        double ratio = double(progress.totalFiles) / lastSuccessfulFiles;
+        if (lastSuccessfulBytes > 0) {
+            ratio = qMax(ratio, double(progress.totalBytes) / lastSuccessfulBytes);
+        }
+        estimateMs = ratio * lastSuccessfulElapsedMs - progressElapsedMs;
+    }
+    // Account for both per-file overhead and byte throughput, using the slower
+    // estimate. Count down from the last monotonic elapsed-time sample.
+    const double remainingMs = estimateMs - progressUpdatedAt.msecsTo(now);
+    if (!std::isfinite(remainingMs) || remainingMs / 1000.0 >= double(std::numeric_limits<qint64>::max())) {
+        return -1;
+    }
+    return remainingMs <= 0 ? 0 : qint64(std::ceil(remainingMs / 1000.0));
 }
 
 BackupRunStore::BackupRunStore(QString path)
@@ -73,6 +118,17 @@ bool BackupRunStore::load(QString *error)
         record.lastSuccess = readDate(object, QStringLiteral("last_success"));
         record.lastFailure = readDate(object, QStringLiteral("last_failure"));
         record.remoteCopyPath = object.value(QStringLiteral("remote_copy_path")).toString();
+        const QJsonObject progress = object.value(QStringLiteral("progress")).toObject();
+        record.progress.totalBytes = qMax(qint64(0), progress.value(QStringLiteral("total_bytes")).toInteger());
+        record.progress.processedBytes = qMax(qint64(0), progress.value(QStringLiteral("processed_bytes")).toInteger());
+        record.progress.totalFiles = qMax(0, progress.value(QStringLiteral("total_files")).toInt());
+        record.progress.processedFiles = qMax(0, progress.value(QStringLiteral("processed_files")).toInt());
+        record.progress.finalizing = progress.value(QStringLiteral("finalizing")).toBool();
+        record.progressElapsedMs = qMax(qint64(0), progress.value(QStringLiteral("elapsed_ms")).toInteger());
+        record.progressUpdatedAt = readDate(progress, QStringLiteral("updated_at"));
+        record.lastSuccessfulElapsedMs = qMax(qint64(0), object.value(QStringLiteral("last_successful_elapsed_ms")).toInteger());
+        record.lastSuccessfulBytes = qMax(qint64(0), object.value(QStringLiteral("last_successful_bytes")).toInteger());
+        record.lastSuccessfulFiles = qMax(0, object.value(QStringLiteral("last_successful_files")).toInt());
         if (record.setId.isEmpty()) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup run state contains an invalid record.");
@@ -103,6 +159,9 @@ bool BackupRunStore::save(QString *error) const
             {QStringLiteral("last_error"), record.lastError},
             {QStringLiteral("attempts"), record.attempts},
             {QStringLiteral("remote_copy_path"), record.remoteCopyPath},
+            {QStringLiteral("last_successful_elapsed_ms"), record.lastSuccessfulElapsedMs},
+            {QStringLiteral("last_successful_bytes"), record.lastSuccessfulBytes},
+            {QStringLiteral("last_successful_files"), record.lastSuccessfulFiles},
         };
         writeDate(object, QStringLiteral("scheduled_for"), record.scheduledFor);
         writeDate(object, QStringLiteral("next_attempt"), record.nextAttempt);
@@ -110,6 +169,16 @@ bool BackupRunStore::save(QString *error) const
         writeDate(object, QStringLiteral("next_scheduled"), record.nextScheduled);
         writeDate(object, QStringLiteral("last_success"), record.lastSuccess);
         writeDate(object, QStringLiteral("last_failure"), record.lastFailure);
+        QJsonObject progress {
+            {QStringLiteral("total_bytes"), record.progress.totalBytes},
+            {QStringLiteral("processed_bytes"), record.progress.processedBytes},
+            {QStringLiteral("total_files"), record.progress.totalFiles},
+            {QStringLiteral("processed_files"), record.progress.processedFiles},
+            {QStringLiteral("finalizing"), record.progress.finalizing},
+            {QStringLiteral("elapsed_ms"), record.progressElapsedMs},
+        };
+        writeDate(progress, QStringLiteral("updated_at"), record.progressUpdatedAt);
+        object.insert(QStringLiteral("progress"), progress);
         records.append(object);
     }
 
@@ -162,6 +231,9 @@ bool BackupRunStore::enqueue(const QString &setId, const QString &reason, const 
     }
 
     record->status = QStringLiteral("pending");
+    record->progress = {};
+    record->progressElapsedMs = 0;
+    record->progressUpdatedAt = {};
     record->reason = reason;
     record->lastError.clear();
     record->scheduledFor = scheduledFor;
@@ -206,11 +278,20 @@ const BackupRunRecord *BackupRunStore::find(const QString &setId) const
 void BackupRunStore::markRunning(BackupRunRecord &record)
 {
     record.status = QStringLiteral("running");
+    record.progress = {};
+    record.progressElapsedMs = 0;
+    record.progressUpdatedAt = {};
     record.attempts++;
 }
 
 void BackupRunStore::markSuccess(BackupRunRecord &record, const QDateTime &now)
 {
+    if (record.progressElapsedMs > 0 && record.progress.totalFiles > 0
+        && record.progress.processedFiles == record.progress.totalFiles) {
+        record.lastSuccessfulElapsedMs = record.progressElapsedMs;
+        record.lastSuccessfulBytes = record.progress.totalBytes;
+        record.lastSuccessfulFiles = record.progress.totalFiles;
+    }
     record.status = QStringLiteral("success");
     record.lastSuccess = now;
     record.lastError.clear();

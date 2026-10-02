@@ -1,5 +1,6 @@
 #include <QTemporaryDir>
 #include <QTest>
+#include <QFile>
 
 #include "../src/backupprerequisites.h"
 #include "../src/backuprunstore.h"
@@ -21,7 +22,107 @@ private slots:
     void monthlySchedulesUseTheLastDay();
     void runStoreCoalescesAndPersistsRetries();
     void prerequisitesGateAcPowerOnlyWhenRequired();
+    void remainingTimeCountsDownAndHandlesIncompleteProgress();
+    void progressPersistsAndResetsForANewAttempt();
+    void olderRunRecordsHaveNoMadeUpEstimate();
+    void previousSuccessProvidesAnInitialSingleFileEstimate();
 };
+
+void ReliabilityTest::previousSuccessProvidesAnInitialSingleFileEstimate()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    BackupRunStore store(home.filePath("runs.json"));
+    store.ensureSet("documents");
+    auto &record = *store.find("documents");
+    const QDateTime now(QDate(2026, 10, 2), QTime(12, 0));
+    store.markRunning(record);
+    record.progress = {1000, 1000, 1, 1, true};
+    record.progressElapsedMs = 20000;
+    store.markSuccess(record, now);
+    QVERIFY(store.save());
+    BackupRunStore reopened(home.filePath("runs.json"));
+    QVERIFY(reopened.load());
+    QVERIFY(reopened.enqueue("documents", "manual", now));
+    auto &next = *reopened.find("documents");
+    reopened.markRunning(next);
+    next.progress = {2000, 0, 1, 0, false};
+    next.progressUpdatedAt = now;
+    QCOMPARE(next.estimatedRemainingSeconds(now), qint64(40));
+    QCOMPARE(next.estimatedRemainingSeconds(now.addSecs(5)), qint64(35));
+    next.progress = {2000, 1000, 2, 1, false};
+    next.progressElapsedMs = 10000;
+    QCOMPARE(next.estimatedRemainingSeconds(now), qint64(10));
+}
+
+void ReliabilityTest::remainingTimeCountsDownAndHandlesIncompleteProgress()
+{
+    const QDateTime now(QDate(2026, 10, 2), QTime(12, 0));
+    BackupRunRecord record;
+    record.status = "running";
+    record.progress = {1000, 200, 10, 2, false};
+    record.progressElapsedMs = 20000;
+    record.progressUpdatedAt = now;
+    QCOMPARE(record.estimatedRemainingSeconds(now), qint64(80));
+    QCOMPARE(record.estimatedRemainingSeconds(now.addSecs(5)), qint64(75));
+    QCOMPARE(record.estimatedRemainingSeconds(now.addSecs(100)), qint64(0));
+    QCOMPARE(record.estimatedRemainingSeconds(now.addSecs(-1)), qint64(-1));
+    record.progress.totalBytes = 10000;
+    QCOMPARE(record.estimatedRemainingSeconds(now), qint64(980));
+    record.progress = {0, 0, 3, 1, false};
+    QCOMPARE(record.estimatedRemainingSeconds(now), qint64(40));
+    record.progress.totalBytes = 100;
+    QCOMPARE(record.estimatedRemainingSeconds(now), qint64(-1));
+    record.progress = {1000, 200, 10, 0, false};
+    QCOMPARE(record.estimatedRemainingSeconds(now), qint64(-1));
+    record.progress = {1000, 1000, 10, 10, true};
+    QCOMPARE(record.estimatedRemainingSeconds(now), qint64(-1));
+    record.progress = {1000, 200, 10, 2, false};
+    record.status = "success";
+    QCOMPARE(record.estimatedRemainingSeconds(now), qint64(-1));
+}
+
+void ReliabilityTest::progressPersistsAndResetsForANewAttempt()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    BackupRunStore store(home.filePath("runs.json"));
+    store.ensureSet("documents");
+    auto &record = *store.find("documents");
+    store.markRunning(record);
+    record.progress = {1000, 200, 10, 2, false};
+    record.progressElapsedMs = 20000;
+    record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
+    QVERIFY(store.save());
+    BackupRunStore reopened(home.filePath("runs.json"));
+    QVERIFY(reopened.load());
+    auto &restored = *reopened.find("documents");
+    QCOMPARE(restored.progress.totalBytes, qint64(1000));
+    QCOMPARE(restored.progress.processedBytes, qint64(200));
+    QCOMPARE(restored.progress.totalFiles, 10);
+    QCOMPARE(restored.progress.processedFiles, 2);
+    QCOMPARE(restored.progressUpdatedAt, record.progressUpdatedAt);
+    QCOMPARE(restored.estimatedRemainingSeconds(record.progressUpdatedAt), qint64(80));
+    reopened.markRunning(restored);
+    QCOMPARE(restored.progress.totalFiles, 0);
+    QCOMPARE(restored.progressElapsedMs, qint64(0));
+    QVERIFY(!restored.progressUpdatedAt.isValid());
+}
+
+void ReliabilityTest::olderRunRecordsHaveNoMadeUpEstimate()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    QFile file(home.filePath("runs.json"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({"runs":[{"set_id":"documents","status":"running"}]})");
+    file.close();
+    BackupRunStore store(file.fileName());
+    QVERIFY(store.load());
+    const auto *record = store.find("documents");
+    QVERIFY(record != nullptr);
+    QCOMPARE(record->estimatedRemainingSeconds(QDateTime::currentDateTimeUtc()), qint64(-1));
+}
 
 void ReliabilityTest::monthlySchedulesUseTheLastDay()
 {

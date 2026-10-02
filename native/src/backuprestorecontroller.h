@@ -38,6 +38,7 @@ signals:
     void copiesChanged();
     void statusChanged(const QString &status);
     void failed(const QString &error);
+    void restoreCompleted();
 
 private:
     BackupEngine &engine;

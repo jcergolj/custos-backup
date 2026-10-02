@@ -285,6 +285,40 @@ QStringList BackupSetController::runningSetIds() const
     return ids;
 }
 
+QVariantMap BackupSetController::remainingTimes() const
+{
+    QVariantMap result;
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    for (const BackupSet &set : config.sets) {
+        const BackupRunRecord *record = runStore.find(set.id);
+        if (record == nullptr || !isRunActive(record->status)) {
+            continue;
+        }
+        QString text;
+        if (record->progress.finalizing || (record->progress.totalFiles > 0
+            && record->progress.processedFiles >= record->progress.totalFiles)) {
+            text = tr("Finalizing backup…");
+        } else {
+            const qint64 seconds = record->estimatedRemainingSeconds(now);
+            if (seconds < 0) {
+                text = tr("Estimating time remaining…");
+            } else if (seconds == 0) {
+                text = tr("Taking longer than estimated…");
+            } else {
+                const QString minutesAndSeconds = QStringLiteral("%1:%2")
+                    .arg(seconds / 60 % 60, 2, 10, QChar('0'))
+                    .arg(seconds % 60, 2, 10, QChar('0'));
+                const QString duration = seconds >= 3600
+                    ? QStringLiteral("%1:%2").arg(seconds / 3600).arg(minutesAndSeconds)
+                    : minutesAndSeconds;
+                text = tr("Est. remaining: %1").arg(duration);
+            }
+        }
+        result.insert(set.id, text);
+    }
+    return result;
+}
+
 QStringList BackupSetController::recentBackups() const
 {
     QStringList summaries;
@@ -595,6 +629,7 @@ void BackupSetController::clearPreview()
 void BackupSetController::refreshRunState()
 {
     if (runStore.load()) {
+        stateTimer.setInterval(runningSetIds().isEmpty() ? 5000 : 1000);
         emit runStateChanged();
         emit dashboardChanged();
     }

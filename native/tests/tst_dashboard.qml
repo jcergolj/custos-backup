@@ -20,9 +20,9 @@ TestCase {
         backupScheduler.error = ""
         backupScheduler.enableCount = 0
         backupScheduler.refreshCount = 0
-        resourceUsage.presetIndex = 0
+        resourceUsage.presetIndex = -1
         resourceUsage.busy = false
-        resourceUsage.savedIndex = -1
+        resourceUsage.savedIndex = -2
         protonAuth.authenticated = true
         protonAuth.checked = true
         protonAuth.checking = false
@@ -38,6 +38,7 @@ TestCase {
         backupSetController.setIds = ["documents-id", "photos-id"]
         backupSetController.currentIndex = 0
         backupSetController.runningSetIds = []
+        backupSetController.remainingTimes = {}
         backupSetController.removedIndex = -1
         backupSetController.addedCount = 0
         backupSetController.refreshCount = 0
@@ -55,6 +56,7 @@ TestCase {
         restoreController.restoredIndexes = []
         restoreController.restoreDestination = ""
         restoreController.restoreCount = 0
+        restoreController.restoreSucceeds = true
         protonFolderBrowser.requestedPath = ""
         protonFolderBrowser.busy = false
         recentBackupCopies.busy = false
@@ -186,6 +188,21 @@ TestCase {
         compare(openMenu(0).itemAt(1).enabled, true)
     }
 
+    function test_runningBackupShowsItsRemainingTimeAndHidesItWhenFinished() {
+        backupSetController.runningSetIds = ["photos-id"]
+        const remaining = control("setRemainingTime-1")
+        tryCompare(remaining, "visible", true)
+        compare(remaining.text, "Estimating time remaining…")
+        backupSetController.remainingTimes = { "photos-id": "Est. remaining: 04:32" }
+        tryCompare(remaining, "text", "Est. remaining: 04:32")
+        // The running set's estimate is independent of the selected editor set.
+        compare(backupSetController.currentIndex, 0)
+        backupSetController.remainingTimes = { "photos-id": "Finalizing backup…" }
+        tryCompare(remaining, "text", "Finalizing backup…")
+        backupSetController.runningSetIds = []
+        tryCompare(remaining, "visible", false)
+    }
+
     function test_setDeletionUsesIdentityAfterListOrderChanges() {
         mouseClick(openMenu(1).itemAt(3))
         const dialog = control("removeSetDialog")
@@ -241,6 +258,9 @@ TestCase {
         const start = control("startRestoreButton")
         const destination = control("restoreDestinationField")
         compare(start.text, "Start restore")
+        compare(start.font.weight, control("importSetsButton").font.weight)
+        compare(start.font.pixelSize, control("importSetsButton").font.pixelSize)
+        compare(control("chooseRestoreDestinationButton").font.weight, control("importSetsButton").font.weight)
         compare(start.enabled, false)
         compare(destination.text, "")
         verify(control("restoreInstructions").text.indexOf("tick the files") >= 0)
@@ -252,6 +272,12 @@ TestCase {
         compare(start.enabled, false)
         destination.text = " /safe/chosen restore "
         compare(start.enabled, true)
+        const texts = visibleTexts(control("restorePanel"))
+        verify(texts.indexOf("Restore selected") < 0)
+        verify(texts.indexOf("Restore folder") < 0)
+        const startPosition = start.mapToItem(control("restorePanel"), 0, 0)
+        const destinationPosition = destination.mapToItem(control("restorePanel"), 0, destination.height)
+        verify(startPosition.y > destinationPosition.y)
         const scroll = control("dashboardScrollView").contentItem
         scroll.contentY = scroll.contentHeight - scroll.height
         waitForRendering(app.contentItem)
@@ -259,12 +285,25 @@ TestCase {
         compare(restoreController.restoreCount, 1)
         compare(restoreController.restoredIndexes, [0])
         compare(restoreController.restoreDestination, "/safe/chosen restore")
-        const texts = visibleTexts(control("restorePanel"))
-        verify(texts.indexOf("Restore selected") < 0)
-        verify(texts.indexOf("Restore folder") < 0)
-        const startPosition = start.mapToItem(control("restorePanel"), 0, 0)
-        const destinationPosition = destination.mapToItem(control("restorePanel"), 0, destination.height)
-        verify(startPosition.y > destinationPosition.y)
+        compare(app.showRestore, false)
+        compare(app.selectedRestoreIndexes, [])
+        compare(destination.text, "")
+    }
+
+    function test_failedRestoreKeepsThePanelAndSelectionOpenForRetry() {
+        showRestoreFiles()
+        mouseClick(control("restoreFile-0"))
+        restoreController.restoreSucceeds = false
+        const destination = control("restoreDestinationField")
+        destination.text = "/safe/restore"
+        const scroll = control("dashboardScrollView").contentItem
+        scroll.contentY = scroll.contentHeight - scroll.height
+        waitForRendering(app.contentItem)
+        mouseClick(control("startRestoreButton"))
+        compare(app.showRestore, true)
+        compare(app.selectedRestoreIndexes, [0])
+        compare(destination.text, "/safe/restore")
+        compare(control("notificationMessageLabel").text, "Restore failed")
     }
 
     function test_changingRestoreFilesClearsVisibleTicksAndSelection() {
@@ -434,6 +473,20 @@ TestCase {
         importDialog.accepted()
         compare(backupSetController.importedPath, dashboardImportFilePath)
         compare(app.showEditor, false)
+    }
+
+    function test_actionButtonsMatchImportAndExportAppearance() {
+        const reference = control("importSetsButton")
+        for (const name of ["exportSetsButton", "newBackupSetButton", "setActions-0",
+                            "openFolder-1", "restore-1", "recentActions-1", "checkSchedulingButton"]) {
+            const action = control(name)
+            verify(action instanceof Button, name + " must use the same button control")
+            compare(action.flat, reference.flat)
+            compare(action.height, reference.height)
+            compare(action.font.pixelSize, reference.font.pixelSize)
+            compare(action.palette.buttonText, reference.palette.buttonText)
+            verify(action.background !== null)
+        }
     }
 
     function test_failedImportKeepsEditorOpen() {
@@ -649,17 +702,29 @@ TestCase {
         mouseClick(openMenu(0).itemAt(0))
         app.showAdvanced = true
         const preset = control("resourceUsagePreset")
+        const defaults = control("useSystemResourceDefaults")
         compare(preset.count, 5)
         compare(preset.model, ["Very low", "Low", "Medium", "High", "Very high"])
         compare(preset.currentIndex, 0)
-        preset.currentIndex = 4
-        compare(control("resourceUsageDescription").text, "CPU limit: 200%")
+        compare(defaults.checked, true)
+        compare(preset.enabled, false)
+        verify(control("resourceUsageDescription").text.indexOf("No CPU cap") >= 0)
         const save = control("saveBackupSetButton")
         save.clicked()
+        compare(resourceUsage.savedIndex, -1)
+        defaults.checked = false
+        compare(preset.enabled, true)
+        preset.currentIndex = 4
+        compare(control("resourceUsageDescription").text, "CPU limit: 200%")
+        save.clicked()
         compare(resourceUsage.savedIndex, 4)
+        defaults.checked = true
+        save.clicked()
+        compare(resourceUsage.savedIndex, -1)
         resourceUsage.busy = true
         compare(save.enabled, false)
         compare(preset.enabled, false)
+        compare(defaults.enabled, false)
     }
 
     function test_themePaletteAndLiveChanges() {

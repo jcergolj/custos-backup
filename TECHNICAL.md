@@ -85,6 +85,26 @@ manifest and identity, and moves that copy to Proton Drive Trash. Older copies
 and the backup set remain; the deleted entry disappears from Recent backups.
 Worker and run-state locks prevent deletion during a backup or queue update.
 
+## Backup Progress And Remaining Time
+
+The engine reports planned file sizes, processed files and bytes, and a finalizing
+phase. The worker persists these progress samples in run state, throttled to
+approximately once per second except for initial progress and finalization.
+Processed counts include failed attempts; they describe work done, not verified
+backup contents. Manifest verification remains the authority for successful files.
+
+Remaining time uses the slower of measured per-file and byte-throughput estimates
+and counts down between samples. The last successful run's duration, bytes, and
+file count provide an initial estimate for later runs, including single-file
+backups. Current-run measurements take over once files finish. A first single-file
+backup cannot provide an estimate before that file finishes. Older run records
+without progress remain compatible and show an estimating state.
+
+The UI polls once per second while a backup is running and every five seconds
+otherwise. Expired estimates show **Taking longer than estimated…** rather than
+claiming zero remaining time. Manifest upload, verification, and post-backup
+cleanup show **Finalizing backup…** until the worker records its final result.
+
 ## Retention And Cleanup
 
 Retention considers only positively identified Custos copies for the
@@ -103,6 +123,9 @@ Restores are limited to manifest entries that passed verification. Destination
 traversal and symbolic-link escapes are rejected. The UI requires users to tick
 files and specify a destination folder before enabling its single **Start
 restore** action. Restore metadata is not added to the local backup queue.
+The controller emits completion only after every selected file restores
+successfully. The UI then closes the restore panel, clears its selection and
+destination, and scrolls back to the dashboard. Failures keep the panel open.
 
 ## Desktop Theme
 
@@ -122,8 +145,13 @@ The package installs these user units:
 /usr/lib/systemd/user/custos.timer
 ```
 
-The worker runs at low priority with idle I/O scheduling and a 10% CPU quota.
-The **Resource usage (all backups)** control offers five global presets:
+By default, the worker and its Proton CLI subprocesses use normal system
+scheduling with no CPU quota. Packaged and generated base service units do not
+set CPU or I/O resource limits. **Use system defaults** is checked unless an
+explicit resource preset has been saved. Previously selected presets remain
+selected after an upgrade.
+
+The **Resource usage (all backups)** control offers five opt-in global presets:
 very low (10%, nice 19), low (25%, nice 15), medium (50%, nice 10), high (100%,
 nice 5), and very high (200%, nice 0). Very low and low use idle I/O scheduling;
 medium, high, and very high use best-effort I/O with priorities 7, 5, and 4.
@@ -134,6 +162,11 @@ Saving a changed preset writes a managed drop-in at
 `systemctl --user daemon-reload`. Reload failures restore the previous file and
 report an error. No root privileges are required. The drop-in is also the
 persistent preset store; backup-set import/export does not change it.
+Returning to **Use system defaults** clears `CPUQuota`, sets `Nice=0`, and
+restores normal I/O scheduling (`IOSchedulingClass=none`, priority 0). These
+explicit resets also override limits in older base service units. The default
+selection is represented internally by preset index -1; indices 0–4 remain the
+five optional presets.
 Both manual and scheduled backups start the same service, so the limits apply
 to the worker and its CLI subprocesses from the next worker start. A running
 backup is not restarted. Quotas are measured against one CPU core, so 200%

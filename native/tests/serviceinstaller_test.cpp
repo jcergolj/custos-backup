@@ -9,11 +9,11 @@ class ServiceInstallerTest final : public QObject
     Q_OBJECT
 
 private slots:
-    void writesUserServiceWithWorkerLimits();
+    void writesUserServiceWithSystemResourceDefaults();
     void rejectsNonExecutableWorker();
 };
 
-void ServiceInstallerTest::writesUserServiceWithWorkerLimits()
+void ServiceInstallerTest::writesUserServiceWithSystemResourceDefaults()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -36,8 +36,9 @@ void ServiceInstallerTest::writesUserServiceWithWorkerLimits()
     const QString contents = QString::fromUtf8(service.readAll());
     QVERIFY(contents.contains(QStringLiteral("ExecStart=").append(workerPath)));
     QVERIFY(contents.contains(QStringLiteral("--config %h/.config/custos/custos-backup.json")));
-    QVERIFY(contents.contains(QStringLiteral("Nice=19")));
-    QVERIFY(contents.contains(QStringLiteral("CPUQuota=10%")));
+    QVERIFY(!contents.contains(QStringLiteral("Nice=")));
+    QVERIFY(!contents.contains(QStringLiteral("CPUQuota=")));
+    QVERIFY(!contents.contains(QStringLiteral("IOSchedulingClass=")));
     QVERIFY(contents.contains(QStringLiteral("NoNewPrivileges=true")));
 
     QFile timer(directory.filePath(QStringLiteral("systemd/custos.timer")));
