@@ -136,6 +136,7 @@ void BackupRestoreControllerTest::browsesWithoutBlockingAndVerifiesOnlyTheSelect
     QVERIFY(provider.downloadedPaths.isEmpty());
     QVERIFY(provider.inspectedPaths.isEmpty());
 
+    controller.setCopySearch("not verified");
     provider.blockInspect = true;
     controller.selectCopy(0);
     QVERIFY(controller.busy());
@@ -149,6 +150,7 @@ void BackupRestoreControllerTest::browsesWithoutBlockingAndVerifiesOnlyTheSelect
     provider.release.release();
     QTRY_VERIFY(!controller.busy());
     QCOMPARE(controller.currentCopyIndex(), 0);
+    QCOMPARE(controller.copies().size(), 2);
     QCOMPARE(provider.downloadedPaths, QStringList {newest + "/manifest.json"});
     QCOMPARE(provider.inspectedPaths, QStringList {newest + "/nested/notes.txt"});
     QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});

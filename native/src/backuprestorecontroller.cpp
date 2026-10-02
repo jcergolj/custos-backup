@@ -115,7 +115,9 @@ QVector<int> BackupRestoreController::filteredCopyIndexes() const
         const RemoteCopy &copy = remoteCopies.at(index);
         const QString haystack = QStringLiteral("%1 %2 %3 %4 %5")
             .arg(copy.computerName, copy.setName, copy.copyId, copy.status, copy.createdAt.toString());
-        if (query.isEmpty() || haystack.toLower().contains(query)) {
+        // Keep the chosen copy visible when verification changes its name/status.
+        // Editing the search clears the selection before recalculating this list.
+        if (index == selectedCopyIndex || query.isEmpty() || haystack.toLower().contains(query)) {
             result.append(index);
         }
     }
