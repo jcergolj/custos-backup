@@ -30,16 +30,6 @@ bool authenticationFailure(const QString &error)
         || message.contains(QStringLiteral("401"));
 }
 
-QString remoteSegment(QString value)
-{
-    QString result;
-    for (const QChar character : value.trimmed()) {
-        result.append(character.isLetterOrNumber() || character == '-' || character == '_' || character == '.'
-                ? character : QChar('_'));
-    }
-    return result.isEmpty() ? QStringLiteral("computer") : result;
-}
-
 QString copyId()
 {
     return QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMddTHHmmsszzz"))
@@ -48,8 +38,7 @@ QString copyId()
 
 QString setRemoteSegment(const BackupSet &set, const QString &computerName)
 {
-    return QDir(set.remoteRoot).filePath(
-        QDir(remoteSegment(computerName)).filePath(remoteSegment(set.name)));
+    return set.remoteFolder(computerName);
 }
 
 }
@@ -160,9 +149,8 @@ int main(int argc, char *argv[])
         QString manifestPath;
         const QString computerName = QSysInfo::machineHostName();
         const QString copy = copyId();
-        const QString copyRoot = QDir(setIterator->remoteRoot).filePath(
-            QDir(remoteSegment(computerName)).filePath(
-                QDir(remoteSegment(setIterator->name)).filePath(copy)));
+        const QString copyRoot = QDir(setIterator->remoteFolder(computerName)).filePath(copy);
+        record.remoteCopyPath = copyRoot;
         const BackupCopyMetadata metadata {
             computerName,
             setIterator->id,

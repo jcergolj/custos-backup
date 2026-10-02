@@ -17,6 +17,7 @@ ApplicationWindow {
     property bool showRestore: false
     property bool showAdvanced: false
     property bool backupRunning: backupSetController.currentRunStatus === "running"
+    property string notificationMessage: ""
     property string systemFontFamily: Qt.application.font.family
     property string displayFontFamily: systemFontFamily
     property string bodyFontFamily: systemFontFamily
@@ -29,31 +30,32 @@ ApplicationWindow {
     property int readableMeasure: 680
     property int contentPadding: 24
     property int cardPadding: 12
-    readonly property color inkColor: "#19232e"
-    readonly property color mutedColor: "#586575"
-    readonly property color lineColor: "#dce1e7"
-    readonly property color softColor: "#f0f3f6"
-    readonly property color accentColor: "#245bcb"
+    readonly property color backgroundColor: themeColors.colors.background
+    readonly property color inkColor: themeColors.colors.foreground
+    readonly property color mutedColor: themeColors.colors.muted
+    readonly property color lineColor: themeColors.colors.border
+    readonly property color softColor: themeColors.colors.surface
+    readonly property color accentColor: themeColors.colors.accent
 
     font.family: bodyFontFamily
     font.pixelSize: bodyTypeSize
-    color: "#ffffff"
+    color: backgroundColor
     palette {
-        window: "#ffffff"
+        window: root.backgroundColor
         windowText: root.inkColor
-        base: "#ffffff"
+        base: root.backgroundColor
         alternateBase: root.softColor
         text: root.inkColor
-        button: "#ffffff"
+        button: root.backgroundColor
         buttonText: root.inkColor
-        brightText: "#ffffff"
-        highlight: root.accentColor
-        highlightedText: "#ffffff"
+        brightText: themeColors.colors.brightText
+        highlight: themeColors.colors.highlight
+        highlightedText: themeColors.colors.highlightedText
         placeholderText: root.mutedColor
-        light: "#ffffff"
+        light: root.softColor
         midlight: root.softColor
         mid: root.lineColor
-        dark: "#aeb7c2"
+        dark: root.lineColor
         shadow: root.lineColor
         toolTipBase: root.softColor
         toolTipText: root.inkColor
@@ -89,6 +91,7 @@ ApplicationWindow {
         scheduleDay.value = backupSetController.currentScheduleDayOfMonth
         retentionSpin.value = backupSetController.currentRetention
         acPowerCheck.checked = backupSetController.currentOnlyOnAcPower
+        resourcePreset.currentIndex = resourceUsage.presetIndex
     }
 
     function localPath(url) {
@@ -134,8 +137,14 @@ ApplicationWindow {
         restoreController.discover(backupSetController.currentRemoteRoot)
     }
 
+    function openRecentBackupFolder(index) {
+        const setId = backupSetController.recentBackupSetIds[index]
+        recentBackupCopies.openCopy(setId)
+    }
+
     function requestRemoveSet(index) {
         removeSetDialog.setIndex = index
+        removeSetDialog.setId = backupSetController.setIds[index]
         removeSetDialog.setName = backupSetController.setNames[index]
         removeSetDialog.open()
     }
@@ -168,16 +177,81 @@ ApplicationWindow {
     }
 
     function setStatus(message) {
-        statusLabel.text = message
-        dashboardStatusLabel.text = message
+        notificationMessage = message
+        if (message.length === 0) {
+            notificationTimer.stop()
+            notificationToast.close()
+        } else {
+            notificationToast.open()
+            notificationTimer.restart()
+        }
     }
 
-    Component.onCompleted: {
+    Timer {
+        id: notificationTimer
+        interval: 5000
+        onTriggered: notificationToast.close()
+    }
+
+    FileDialog {
+        id: importSetsDialog
+        objectName: "importSetsDialog"
+        title: qsTr("Import backup sets (replace current list)")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Custos backup sets (*.json)")]
+        onAccepted: {
+            if (backupSetController.importSets(root.localPath(selectedFile))) {
+                root.showEditor = false
+                root.loadCurrentSet()
+            }
+        }
+    }
+
+    FileDialog {
+        id: exportSetsDialog
+        objectName: "exportSetsDialog"
+        title: qsTr("Export backup sets")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "json"
+        nameFilters: [qsTr("Custos backup sets (*.json)")]
+        onAccepted: backupSetController.exportSets(root.localPath(selectedFile))
+    }
+
+    Popup {
+        id: notificationToast
+        objectName: "notificationToast"
+        parent: Overlay.overlay
+        x: root.width - width - root.contentPadding
+        y: root.contentPadding
+        width: Math.min(360, root.width - 2 * root.contentPadding)
+        padding: 16
+        closePolicy: Popup.NoAutoClose
+        modal: false
+        focus: false
+        background: Rectangle {
+            color: root.softColor
+            radius: 8
+            border.color: root.lineColor
+        }
+        contentItem: Label {
+            objectName: "notificationMessageLabel"
+            text: root.notificationMessage
+            wrapMode: Text.WordWrap
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: text
+        }
+    }
+
+    function updateDisabledPalette() {
         // Shared palette roles update every color group; apply disabled roles last.
         palette.disabled.text = mutedColor
         palette.disabled.windowText = mutedColor
         palette.disabled.buttonText = mutedColor
         palette.disabled.button = softColor
+    }
+
+    Component.onCompleted: {
+        updateDisabledPalette()
         showEditor = false
         loadCurrentSet()
     }
@@ -187,14 +261,15 @@ ApplicationWindow {
         objectName: "removeSetDialog"
         anchors.centerIn: parent
         property int setIndex: -1
+        property string setId: ""
         property string setName: ""
-        title: qsTr("Remove backup")
+        title: qsTr("Delete backup set")
         width: Math.min(root.width - 2 * root.contentPadding, 420)
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         contentItem: Label {
-            text: qsTr("Remove \"%1\" from Custos? Existing remote copies will not be deleted.").arg(removeSetDialog.setName)
+            text: qsTr("Delete the \"%1\" backup set from Custos? Its configuration and schedule will be removed. Copies already stored in Proton Drive will remain.").arg(removeSetDialog.setName)
             font.pixelSize: root.bodyTypeSize
             lineHeight: root.bodyLeading
             lineHeightMode: Text.ProportionalHeight
@@ -203,33 +278,108 @@ ApplicationWindow {
         }
 
         onAccepted: {
-            if (setIndex >= 0) {
-                backupSetController.removeSet(setIndex)
+            const index = backupSetController.setIds.indexOf(setId)
+            if (index >= 0) {
+                backupSetController.removeSet(index)
             }
             setIndex = -1
+            setId = ""
             setName = ""
         }
 
         onRejected: {
             setIndex = -1
+            setId = ""
             setName = ""
         }
+        onOpened: standardButton(Dialog.Ok).text = qsTr("Delete")
+    }
+
+    Dialog {
+        id: deleteCopyDialog
+        objectName: "deleteCopyDialog"
+        anchors.centerIn: parent
+        property string backupName: ""
+        property string copyPath: ""
+        title: qsTr("Delete backup copy")
+        width: Math.min(root.width - 2 * root.contentPadding, 480)
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label {
+            text: qsTr("Delete this copy of \"%1\" from Proton Drive? The copy and all its files will be moved to Proton Drive Trash. Your backup set and other copies will remain.\n\n%2")
+                .arg(deleteCopyDialog.backupName).arg(deleteCopyDialog.copyPath)
+            padding: 16
+            wrapMode: Text.Wrap
+        }
+        onOpened: standardButton(Dialog.Ok).text = qsTr("Delete copy")
+        onAccepted: recentBackupCopies.confirmDelete()
+        onRejected: recentBackupCopies.cancelDelete()
     }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        Label {
-            text: qsTr("Custos Backup")
-            font.family: root.displayFontFamily
-            font.pixelSize: root.displayTypeSize
-            font.weight: Font.Bold
-            font.letterSpacing: 0.4
-            color: root.inkColor
+        RowLayout {
+            Layout.fillWidth: true
             Layout.leftMargin: root.contentPadding
+            Layout.rightMargin: root.contentPadding
             Layout.topMargin: 24
             Layout.bottomMargin: 16
+            spacing: 12
+
+            Label {
+                text: qsTr("Custos Backup")
+                font.family: root.displayFontFamily
+                font.pixelSize: root.displayTypeSize
+                font.weight: Font.Bold
+                font.letterSpacing: 0.4
+                color: root.inkColor
+                Layout.fillWidth: true
+            }
+
+            Button {
+                objectName: "protonSignInButton"
+                text: protonAuth.checking ? qsTr("Checking Proton…") : qsTr("Sign in to Proton")
+                visible: !protonAuth.authenticated
+                enabled: protonAuth.checked && !protonAuth.checking
+                Layout.preferredHeight: 36
+                ToolTip.visible: hovered
+                ToolTip.text: protonAuth.error || qsTr("Open the Proton Drive CLI login in your terminal")
+                onClicked: protonAuth.signIn()
+            }
+
+            Button {
+                objectName: "protonAuthRetryButton"
+                text: qsTr("↻")
+                visible: protonAuth.checked && !protonAuth.authenticated
+                enabled: !protonAuth.checking
+                Layout.preferredHeight: 36
+                Accessible.name: qsTr("Check Proton Drive sign-in")
+                ToolTip.visible: hovered
+                ToolTip.text: Accessible.name
+                onClicked: protonAuth.refresh()
+            }
+
+            Button {
+                objectName: "importSetsButton"
+                text: qsTr("Import")
+                Layout.preferredHeight: 36
+                enabled: !recentBackupCopies.busy
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Load backup sets from a JSON export")
+                onClicked: importSetsDialog.open()
+            }
+
+            Button {
+                objectName: "exportSetsButton"
+                text: qsTr("Export")
+                Layout.preferredHeight: 36
+                enabled: backupSetController.setNames.length > 0
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Export saved backup sets to a JSON file")
+                onClicked: exportSetsDialog.open()
+            }
         }
 
         StackLayout {
@@ -249,15 +399,8 @@ ApplicationWindow {
                     anchors.rightMargin: root.contentPadding
                     spacing: 20
 
-                    Label {
-                        text: qsTr("Backups")
-                        font.pixelSize: root.pageTitleSize
-                        font.weight: Font.DemiBold
-                        Layout.fillWidth: true
-                        Layout.topMargin: 8
-                    }
-
                     RowLayout {
+                        id: dashboardColumns
                         Layout.fillWidth: true
                         Layout.preferredHeight: 56 + Math.max(180, Math.min(360,
                             root.height - 280,
@@ -267,7 +410,7 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.preferredWidth: 1
+                            Layout.preferredWidth: (dashboardColumns.width - dashboardColumns.spacing) / 3
                             Layout.minimumWidth: 0
                             spacing: 16
 
@@ -285,9 +428,13 @@ ApplicationWindow {
 
                                 Button {
                                     objectName: "newBackupSetButton"
-                                    text: qsTr("New backup set")
-                                    font.pixelSize: root.metadataTypeSize
+                                    text: "+"
+                                    font.pixelSize: 20
+                                    Layout.preferredWidth: 36
                                     Layout.preferredHeight: 36
+                                    Accessible.name: qsTr("New backup set")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: Accessible.name
                                     onClicked: root.createNewSet()
                                 }
                             }
@@ -320,7 +467,7 @@ ApplicationWindow {
                                     implicitHeight: Math.max(80, setNameLabel.implicitHeight + 32)
                                     padding: 16
                                     background: Rectangle {
-                                        color: "#ffffff"
+                                        color: root.backgroundColor
                                         radius: 8
                                         border.color: root.lineColor
                                     }
@@ -404,7 +551,7 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.preferredWidth: 1
+                            Layout.preferredWidth: 2 * (dashboardColumns.width - dashboardColumns.spacing) / 3
                             Layout.minimumWidth: 0
                             spacing: 16
 
@@ -426,7 +573,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 clip: true
-                                spacing: 10
+                                spacing: 12
                                 ScrollBar.vertical: ScrollBar {}
 
                                 Label {
@@ -444,8 +591,8 @@ ApplicationWindow {
                                     required property string modelData
                                     readonly property string timestamp: backupSetController.recentBackupTimestamps[index] || ""
                                     width: recentBackupsList.width
-                                    implicitHeight: Math.max(96, recentSummary.implicitHeight + 32)
-                                    padding: 16
+                                    implicitHeight: 80
+                                    padding: 20
                                     background: Rectangle {
                                         color: root.softColor
                                         radius: 8
@@ -453,63 +600,77 @@ ApplicationWindow {
 
                                     RowLayout {
                                         anchors.fill: parent
-                                        spacing: 12
+                                        spacing: 16
 
-                                        ColumnLayout {
+                                        Label {
                                             id: recentSummary
+                                            objectName: "recentSummary-" + recentRow.index
+                                            text: recentRow.modelData.replace(/\s*\r?\n\s*/g, " · ")
+                                                + (recentRow.timestamp.length > 0 ? " · " + recentRow.timestamp : "")
+                                            font.pixelSize: root.bodyTypeSize
+                                            wrapMode: Text.NoWrap
+                                            elide: Text.ElideRight
+                                            maximumLineCount: 1
                                             Layout.fillWidth: true
                                             Layout.minimumWidth: 0
-                                            Layout.alignment: Qt.AlignTop
-                                            spacing: 4
+                                            ToolTip.visible: recentSummaryHover.hovered && truncated
+                                            ToolTip.text: text
 
-                                            Label {
-                                                objectName: "recentSummary-" + recentRow.index
-                                                text: recentRow.modelData
-                                                wrapMode: Text.Wrap
-                                                lineHeight: root.bodyLeading
-                                                lineHeightMode: Text.ProportionalHeight
-                                                font.pixelSize: root.bodyTypeSize
-                                                Layout.fillWidth: true
-                                            }
+                                            HoverHandler { id: recentSummaryHover }
+                                        }
 
-                                            Label {
-                                                text: qsTr("Last activity: %1").arg(recentRow.timestamp)
-                                                visible: recentRow.timestamp.length > 0
-                                                color: root.mutedColor
-                                                font.pixelSize: root.metadataTypeSize
-                                                wrapMode: Text.Wrap
-                                                Layout.fillWidth: true
-                                            }
+                                        ToolButton {
+                                            objectName: "openFolder-" + recentRow.index
+                                            text: "↗"
+                                            font.pixelSize: 20
+                                            palette.buttonText: root.accentColor
+                                            palette.disabled.buttonText: root.mutedColor
+                                            Layout.preferredWidth: 36
+                                            Layout.preferredHeight: 36
+                                            Accessible.name: qsTr("Open %1 in Proton Drive")
+                                                .arg(backupSetController.recentBackups[recentRow.index].split("\n")[0])
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: Accessible.name
+                                            enabled: recentRow.timestamp.length > 0 && !protonFolderBrowser.busy && !recentBackupCopies.busy
+                                                && backupSetController.setIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) >= 0
+                                            onClicked: root.openRecentBackupFolder(recentRow.index)
                                         }
 
                                         Button {
                                             objectName: "restore-" + recentRow.index
                                             text: qsTr("Restore")
                                             Layout.preferredHeight: 36
-                                            Layout.alignment: Qt.AlignTop
                                             enabled: recentRow.timestamp.length > 0
                                                 && backupSetController.setIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) >= 0
                                             onClicked: root.restoreRecentBackup(recentRow.index)
                                         }
+
+                                        ToolButton {
+                                            id: recentActionsButton
+                                            objectName: "recentActions-" + recentRow.index
+                                            text: "⋯"
+                                            font.pixelSize: 24
+                                            Layout.preferredWidth: 36
+                                            Layout.preferredHeight: 36
+                                            Accessible.name: qsTr("Recent backup actions")
+                                            onClicked: recentActionsMenu.open()
+                                            Menu {
+                                                id: recentActionsMenu
+                                                objectName: "recentMenu-" + recentRow.index
+                                                x: recentActionsButton.width - width
+                                                y: recentActionsButton.height
+                                                MenuItem {
+                                                    text: qsTr("Delete copy")
+                                                    enabled: recentRow.timestamp.length > 0 && !recentBackupCopies.busy
+                                                        && backupSetController.setIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) >= 0
+                                                        && backupSetController.runningSetIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) < 0
+                                                    onTriggered: recentBackupCopies.requestDelete(backupSetController.recentBackupSetIds[recentRow.index])
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    Label {
-                        id: dashboardStatusLabel
-                        objectName: "dashboardStatusLabel"
-                        visible: text.length > 0
-                        font.pixelSize: root.bodyTypeSize
-                        lineHeight: root.bodyLeading
-                        lineHeightMode: Text.ProportionalHeight
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        padding: 12
-                        background: Rectangle {
-                            color: root.softColor
-                            radius: 6
                         }
                     }
 
@@ -663,19 +824,16 @@ ApplicationWindow {
                         Item { Layout.fillWidth: true }
 
                         Button {
-                            text: qsTr("Close")
+                            objectName: "closeEditorButton"
+                            text: "×"
+                            font.pixelSize: 20
+                            Layout.preferredWidth: 36
+                            Layout.preferredHeight: 36
+                            Accessible.name: qsTr("Close editor")
+                            ToolTip.visible: hovered
+                            ToolTip.text: Accessible.name
                             onClicked: root.showEditor = false
                         }
-                    }
-
-                    Label {
-                        text: qsTr("Give your backup a name, choose what to include or exclude, and set its schedule.")
-                        font.pixelSize: root.bodyTypeSize
-                        lineHeight: root.bodyLeading
-                        lineHeightMode: Text.ProportionalHeight
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                        Layout.maximumWidth: root.readableMeasure
                     }
 
             Label {
@@ -707,6 +865,7 @@ ApplicationWindow {
 
                 Button {
                     id: addSourceButton
+                    objectName: "addSourceButton"
                     text: "+"
                     font.pixelSize: 20
                     ToolTip.visible: hovered
@@ -739,6 +898,10 @@ ApplicationWindow {
 
             Menu {
                 id: sourceMenu
+                objectName: "sourceMenu"
+                parent: addSourceButton
+                x: addSourceButton.width - width
+                y: addSourceButton.height
 
                 MenuItem {
                     text: qsTr("Add files")
@@ -803,6 +966,8 @@ ApplicationWindow {
                 }
 
                 Button {
+                    id: addExclusionButton
+                    objectName: "addExclusionButton"
                     text: "+"
                     font.pixelSize: 20
                     ToolTip.visible: hovered
@@ -813,6 +978,10 @@ ApplicationWindow {
 
             Menu {
                 id: exclusionMenu
+                objectName: "exclusionMenu"
+                parent: addExclusionButton
+                x: addExclusionButton.width - width
+                y: addExclusionButton.height
 
                 MenuItem {
                     text: qsTr("Exclude files")
@@ -840,7 +1009,7 @@ ApplicationWindow {
 
             TextArea {
                 id: exclusionsField
-                placeholderText: qsTr("Choose exclusions with + or enter paths, one per line")
+                placeholderText: qsTr("Full paths or folder names, one per line (e.g. node_modules)")
                 wrapMode: TextArea.Wrap
                 Layout.fillWidth: true
                 Layout.preferredHeight: 72
@@ -922,71 +1091,13 @@ ApplicationWindow {
                 Layout.fillWidth: true
             }
 
-            RowLayout {
-                Layout.fillWidth: true
-
-                Button {
-                    text: qsTr("Save")
-                    onClicked: {
-                        syncCurrentSet()
-                        backupSetController.save()
-                    }
-                }
-
-                Button {
-                    text: qsTr("Preview")
-                    onClicked: {
-                        syncCurrentSet()
-                        backupSetController.preview()
-                    }
-                }
-
-                Button {
-                    text: qsTr("Back up")
-                    enabled: sourceModel.count > 0 && setNameField.text.trim().length > 0
-                    onClicked: {
-                        syncCurrentSet()
-                        if (backupSetController.save()) {
-                            root.setStatus(qsTr("Starting background backup..."))
-                            backupLauncher.startBackup(backupSetController.currentId)
-                        }
-                    }
-                }
-
-                BusyIndicator {
-                    running: root.backupRunning
-                    visible: running
-                    Layout.preferredWidth: 24
-                    Layout.preferredHeight: 24
-                }
-
-                Label {
-                    text: qsTr("Backup in progress...")
-                    font.pixelSize: root.metadataTypeSize
-                    color: root.accentColor
-                    visible: root.backupRunning
-                }
-            }
-
             Label {
                 text: qsTr("Next run: %1").arg(backupSetController.currentNextRun)
                 font.pixelSize: root.metadataTypeSize
             }
 
-            Label {
-                text: qsTr("Run state: %1%2")
-                    .arg(backupSetController.currentRunStatus)
-                    .arg(backupSetController.currentRunError.length > 0
-                        ? qsTr(" (%1)").arg(backupSetController.currentRunError)
-                        : "")
-                Layout.fillWidth: true
-                font.pixelSize: root.metadataTypeSize
-                lineHeight: root.bodyLeading
-                lineHeightMode: Text.ProportionalHeight
-                wrapMode: Text.WordWrap
-            }
-
             Button {
+                objectName: "advancedSettingsButton"
                 text: qsTr("Advanced settings")
                 checkable: true
                 checked: root.showAdvanced
@@ -994,6 +1105,7 @@ ApplicationWindow {
             }
 
             GroupBox {
+                objectName: "advancedSettingsPanel"
                 visible: root.showAdvanced
                 title: qsTr("Advanced settings")
                 Layout.fillWidth: true
@@ -1041,27 +1153,43 @@ ApplicationWindow {
                         id: acPowerCheck
                         text: qsTr("Only back up on AC power")
                     }
+
+                    Label {
+                        text: qsTr("Resource usage (all backups)")
+                        font.pixelSize: root.sectionTitleSize
+                        font.weight: Font.DemiBold
+                        color: root.accentColor
+                    }
+
+                    ComboBox {
+                        id: resourcePreset
+                        objectName: "resourceUsagePreset"
+                        model: resourceUsage.names
+                        enabled: !resourceUsage.busy
+                        Layout.fillWidth: true
+                        Accessible.name: qsTr("Backup resource usage")
+                    }
+
+                    Label {
+                        objectName: "resourceUsageDescription"
+                        text: resourceUsage.descriptions[resourcePreset.currentIndex] || ""
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Label {
+                        text: qsTr("Applies to all manual and scheduled backups after Save, when the next worker starts. 100% allows one full CPU core; 200% allows two. A lower nice value gives the worker higher CPU priority.")
+                        font.pixelSize: root.metadataTypeSize
+                        color: root.mutedColor
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
                 }
-            }
-
-            Label {
-                id: statusLabel
-                font.pixelSize: root.bodyTypeSize
-                lineHeight: root.bodyLeading
-                lineHeightMode: Text.ProportionalHeight
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-            }
-
-            Label {
-                text: qsTr("Included files (%1)").arg(backupSetController.previewIncluded.length)
-                font.pixelSize: root.sectionTitleSize
-                font.weight: Font.DemiBold
-                color: root.accentColor
             }
 
             ListView {
                 id: previewList
+                visible: count > 0
                 model: backupSetController.previewIncluded
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(150, contentHeight)
@@ -1073,18 +1201,6 @@ ApplicationWindow {
                     elide: Text.ElideMiddle
                     width: previewList.width
                 }
-            }
-
-            Label {
-                text: qsTr("Excluded: %1, skipped: %2, missing: %3")
-                    .arg(backupSetController.previewExcluded.length)
-                    .arg(backupSetController.previewSkipped.length)
-                    .arg(backupSetController.previewMissing.length)
-                Layout.fillWidth: true
-                font.pixelSize: root.metadataTypeSize
-                lineHeight: root.bodyLeading
-                lineHeightMode: Text.ProportionalHeight
-                wrapMode: Text.WordWrap
             }
 
             Label {
@@ -1118,10 +1234,75 @@ ApplicationWindow {
                 onClicked: backupSetController.confirmCleanup()
             }
 
+            RowLayout {
+                objectName: "editorActionsRow"
+                Layout.fillWidth: true
+                Layout.bottomMargin: root.contentPadding
+
+                Button {
+                    objectName: "saveBackupSetButton"
+                    text: qsTr("Save")
+                    enabled: !resourceUsage.busy
+                    onClicked: {
+                        syncCurrentSet()
+                        if (backupSetController.save()) {
+                            resourceUsage.save(resourcePreset.currentIndex)
+                        }
+                    }
+                }
+
+                Button {
+                    objectName: "previewBackupSetButton"
+                    text: qsTr("Preview")
+                    onClicked: {
+                        syncCurrentSet()
+                        backupSetController.preview()
+                    }
+                }
+
+                BusyIndicator {
+                    running: root.backupRunning
+                    visible: running
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                }
+
+                Label {
+                    text: qsTr("Backup in progress...")
+                    font.pixelSize: root.metadataTypeSize
+                    color: root.accentColor
+                    visible: root.backupRunning
+                }
+            }
+
         }
     }
 
         }
+    }
+
+    onActiveChanged: {
+        if (active) {
+            protonAuth.refresh()
+        }
+    }
+
+    Connections {
+        target: resourceUsage
+        function onPresetChanged() { resourcePreset.currentIndex = resourceUsage.presetIndex }
+        function onStatusChanged(message) { root.setStatus(message) }
+        function onFailed(error) { root.setStatus(error) }
+    }
+
+    Connections {
+        target: themeColors
+        function onColorsChanged() { Qt.callLater(root.updateDisabledPalette) }
+    }
+
+    Connections {
+        target: protonAuth
+        function onStatusChanged(message) { root.setStatus(message) }
+        function onFailed(error) { root.setStatus(error) }
     }
 
     Connections {
@@ -1137,7 +1318,30 @@ ApplicationWindow {
 
     Connections {
         target: backupLauncher
-        function onStarted() { root.setStatus(qsTr("Backup started.")) }
+        function onStarted() { root.setStatus("") }
+        function onFailed(error) { root.setStatus(error) }
+    }
+
+    Connections {
+        target: recentBackupCopies
+        function onFolderResolved(path) { protonFolderBrowser.openFolder(path) }
+        function onDeleteConfirmationReady(name, path) {
+            deleteCopyDialog.backupName = name
+            deleteCopyDialog.copyPath = path
+            deleteCopyDialog.open()
+        }
+        function onCopyDeleted(setId) { backupSetController.refreshRunState() }
+        function onStatusChanged(message) { root.setStatus(message) }
+        function onFailed(error) { root.setStatus(error) }
+    }
+
+    Connections {
+        target: protonFolderBrowser
+        function onFolderResolved(url) {
+            if (!Qt.openUrlExternally(url)) {
+                root.setStatus(qsTr("Unable to open Proton Drive in your browser."))
+            }
+        }
         function onFailed(error) { root.setStatus(error) }
     }
 

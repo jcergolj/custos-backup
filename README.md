@@ -1,22 +1,19 @@
 # Custos Backup
 
-Custos Backup is a small Qt desktop app for backing up selected files and
+Custos Backup is a small Omarchy desktop app for backing up selected files and
 folders to Proton Drive. It runs as your user and uses Proton's official
 `proton-drive` CLI. It is intended for personal files and folders, not system
 images, boot files, filesystem snapshots, or consistent live-database backups.
 
-## Quick Start
+Create a named backup set for documents, photos, projects, or personal
+configuration folders, then run it manually or on a schedule. Each run creates
+a separate copy you can restore later.
 
-### 1. Install
+## Get started
 
-The package name is `custos-git`. On Omarchy, install it from the
-AUR when it is available:
+### 1. Install Custos
 
-```bash
-omarchy pkg aur add custos-git
-```
-
-Until the AUR entry is available, build the public recipe directly:
+On Arch Linux or Omarchy, build and install the package:
 
 ```bash
 sudo pacman -S --needed base-devel git
@@ -25,18 +22,20 @@ cd custos-backup/pkgbuild
 makepkg -Csi
 ```
 
-The package installs the `custos` app and worker, the **Custos Backup** launcher
-entry, and user systemd units. Start it from the Omarchy
-launcher with `Super+Space`, or run:
-
-```bash
-custos
-```
+Open **Custos Backup** from your app launcher, or run `custos`.
 
 ### 2. Authenticate Proton Drive
 
 Install the `proton-drive` CLI using the package or release source supported by
-your system. Authenticate it as the same user who will run Custos:
+your system. Authenticate it as the same user who will run Custos.
+
+When Custos cannot connect to Proton Drive, it shows **Sign in to Proton**.
+Press it to open the CLI login in your terminal, which launches your browser.
+Keep the terminal open until authentication completes. Custos checks the
+connection again automatically; use **↻** to check immediately. The button's
+tooltip shows the last connection error.
+
+You can also sign in from a terminal:
 
 ```bash
 command -v proton-drive
@@ -44,25 +43,46 @@ proton-drive auth login
 proton-drive filesystem info /my-files
 ```
 
-Custos never asks for or stores your Proton password.
+Custos uses this login session. It never asks for or stores your Proton password.
+The sign-in button uses `xdg-terminal-exec`, available on Omarchy. If it cannot
+open a terminal, use the commands above.
 
 ### 3. Create and run a backup
 
-1. Open **Custos Backup** and choose **New backup**.
-2. Give it a name, such as **Documents**.
-3. Use **+** to select files or folders. Hidden paths such as `~/.config` are valid.
-4. Choose any files or folders to exclude with **+** under **Exclusions**, or enter
-   their paths, one per line.
+1. Open **Custos Backup** and press **+** beside **Backup sets**.
+2. Name the set, such as **Documents** or **Projects**.
+3. Use **+** under **Source files and folders** to choose what to back up.
+4. Select exclusions with **+** under **Exclusions**, or enter names or paths,
+   one per line.
 5. Choose a schedule, or leave scheduling disabled for manual backups.
-6. Press **Save**, then **Back up** to make the first copy. **Preview** lets you
-   review included, excluded, skipped, and missing paths before running.
+6. Press **Save**, then open the set's **⋯** menu and choose **Back up now**.
 
-Each named backup has its own files, exclusions, and schedule. Every run creates
-a separate copy. By default, copies are stored under `/my-files/backups` in Proton
-Drive, and the latest three verified successful copies are kept.
+Hidden paths such as `~/.config` are valid sources; select the folder or enter its
+full path in a source field. Use **Preview** to review included, excluded,
+skipped, and missing paths before running.
 
-**Advanced settings** lets you change the remote folder and number of copies to
-keep, or run only on AC power.
+Each named backup set has its own files, exclusions, and schedule. Every run
+creates a separate copy. By default, copies are stored under `/my-files/backups`
+in Proton Drive, and the latest three verified successful copies are kept.
+
+**Advanced settings** lets you change the remote folder and number of copies
+to keep, or run only on AC power.
+
+It also offers a **Resource usage (all backups)** setting:
+
+| Preset | CPU quota | CPU priority (`nice`) | I/O priority |
+| --- | ---: | ---: | --- |
+| Very low (default) | 10% | 19 | Idle |
+| Low | 25% | 15 | Idle |
+| Medium | 50% | 10 | Best effort |
+| High | 100% | 5 | Best effort |
+| Very high | 200% | 0 | Best effort |
+
+Press **Save** to apply your choice to all manual and scheduled backups. New
+limits take effect when the next worker starts; a running backup keeps its
+current limits. A 100% quota allows one full CPU core, and 200% allows two.
+Lower `nice` values give the worker higher CPU priority. These limits affect the
+backup worker and its CLI processes, not the desktop interface.
 
 Schedules can be daily, weekly, or monthly. If a monthly day does not exist in
 the current month, the last day of that month is used.
@@ -70,7 +90,7 @@ the current month, the last day of that month is used.
 ### 4. Enable scheduling
 
 Scheduling is not enabled during installation. First save at least one backup
-and confirm that Proton Drive authentication works:
+set and confirm that Proton Drive authentication works:
 
 ```bash
 systemctl --user daemon-reload
@@ -81,25 +101,62 @@ systemctl --user status custos.timer
 The timer runs as your user after login and catches up missed work. It does not
 require user lingering.
 
+## Desktop theme
+
+Custos follows your active Omarchy theme and updates its colors while open when
+you switch themes. On other desktops, it uses the system's Qt color palette.
+
+## Exclude folders such as node_modules
+
+Enter exclusions one per line:
+
+```text
+node_modules
+vendor
+/home/you/projects/cache
+```
+
+A folder name excludes every matching folder at any depth. A full path excludes
+only that file or folder. You can also select a specific path with **+**.
+
+## Import and export backup sets
+
+Use **Export** in the top-right to save your backup sets as a JSON file.
+Use **Import** to load that file into Custos. Import replaces the configured set list.
+
+The file contains sources, exclusions, schedules, and settings. Your backed-up
+files, Proton login, and this computer's global resource preset are not included.
+
 ## Restore
 
-To restore after reinstalling or moving to another computer:
-
-1. Install Custos Backup and authenticate `proton-drive`.
-2. Open the app and enter the old remote root.
-3. Press **Discover remote backups**. Do not recreate a local backup first.
-4. Select the computer, backup copy, and verified files to restore.
-5. Choose a separate destination folder and start the restore.
+1. Press **Restore** on a backup in **Recent backups** that has a recorded run.
+2. Select a remote copy. Use the search field to filter by computer, backup name,
+   copy, or status.
+3. Select the verified files, or enter a source folder to restore.
+4. Choose a separate destination folder and start the restore.
 
 Incomplete copies expose only verified entries. Missing, failed, malformed, or
 unverifiable items are not presented as successful restores.
 
-## Daily Operation
+For a reinstall or move to another computer, keep or transfer `~/.config/custos`
+so the backup definitions and run history remain available, then install Custos
+and authenticate `proton-drive` as the new machine's user. The current UI opens
+remote discovery through **Restore** on a recorded backup; it does not yet have
+a standalone remote-root discovery action for a fresh installation.
+
+## Manage copies
+
+- **↗** opens that copy in Proton Drive in your browser.
+- **⋯ → Delete copy** confirms the exact copy before moving it to Proton Drive Trash.
+- **Delete** on a backup set removes its configuration and schedule; remote copies remain.
+
+## Daily operation
 
 - Use **Preview** before a first backup or after changing sources and exclusions.
 - Retention keeps three verified successful copies by default.
 - Failed or incomplete runs do not remove older successful copies.
-- The first cleanup proposal requires confirmation; later cleanups use the saved decision.
+- The first cleanup proposal requires confirmation; later cleanups use the saved
+  decision.
 - To stop scheduling without uninstalling:
 
 ```bash
@@ -134,10 +191,11 @@ systemctl --user disable --now custos.timer
 sudo pacman -Rns custos-git
 ```
 
-Package removal does not delete `~/.config/custos` or remote backups. Keep
-them if you may need to restore later.
+Package removal does not delete `~/.config/custos`, the user-systemd resource
+drop-in, or remote backups. Keep your configuration and backups if you may need
+to restore later.
 
-## Technical Documentation
+## Technical documentation
 
 See [Technical Notes](TECHNICAL.md) for remote layout, manifests, verification,
 cleanup behavior, and package/service details.

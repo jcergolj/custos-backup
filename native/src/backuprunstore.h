@@ -16,6 +16,7 @@ struct BackupRunRecord {
     QDateTime nextScheduled;
     QDateTime lastSuccess;
     QDateTime lastFailure;
+    QString remoteCopyPath;
 };
 
 class BackupRunStore final

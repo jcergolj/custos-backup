@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 QuickDialogs2 Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 QuickDialogs2 Test Concurrent)
 
 qt_add_executable(custos
     src/main.cpp
@@ -26,6 +26,11 @@ qt_add_executable(custos
     src/localprovider.cpp
     src/qprocessrunner.cpp
     src/protonprovider.cpp
+    src/protonfolderbrowser.cpp
+    src/recentbackupcopies.cpp
+    src/protonauthcontroller.cpp
+    src/themecolors.cpp
+    src/resourceusage.cpp
     src/backupjob.cpp
     src/backupworker.cpp
     src/backuplauncher.cpp
@@ -67,9 +72,65 @@ target_link_libraries(custos PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::QuickDialogs2
+    Qt6::Concurrent
 )
 
 enable_testing()
+
+qt_add_executable(resourceusage-test tests/resourceusage_test.cpp src/resourceusage.cpp)
+target_link_libraries(resourceusage-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME resourceusage-test COMMAND resourceusage-test)
+
+qt_add_executable(protonauthcontroller-test
+    tests/protonauthcontroller_test.cpp
+    src/protonauthcontroller.cpp
+)
+target_link_libraries(protonauthcontroller-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME protonauthcontroller-test COMMAND protonauthcontroller-test)
+
+qt_add_executable(themecolors-test
+    tests/themecolors_test.cpp
+    src/themecolors.cpp
+)
+target_link_libraries(themecolors-test PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME themecolors-test COMMAND themecolors-test)
+set_tests_properties(themecolors-test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=")
+
+qt_add_executable(backupsetcontroller-test
+    tests/backupsetcontroller_test.cpp
+    src/backupsetcontroller.cpp
+    src/backupengine.cpp
+    src/backupconfig.cpp
+    src/backupschedule.cpp
+    src/backuprunstore.cpp
+    src/backupecleanup.cpp
+    src/backupcatalog.cpp
+    src/backupmanifest.cpp
+)
+
+target_link_libraries(backupsetcontroller-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME backupsetcontroller-test COMMAND backupsetcontroller-test)
+
+qt_add_executable(protonfolderbrowser-test
+    tests/protonfolderbrowser_test.cpp
+    src/protonfolderbrowser.cpp
+)
+target_link_libraries(protonfolderbrowser-test PRIVATE Qt6::Core Qt6::Test Qt6::Concurrent)
+add_test(NAME protonfolderbrowser-test COMMAND protonfolderbrowser-test)
+
+qt_add_executable(recentbackupcopies-test
+    tests/recentbackupcopies_test.cpp
+    src/recentbackupcopies.cpp
+    src/backupconfig.cpp
+    src/backupecleanup.cpp
+    src/backupschedule.cpp
+    src/backuprunstore.cpp
+    src/backupmanifest.cpp
+    src/backupengine.cpp
+    src/localprovider.cpp
+)
+target_link_libraries(recentbackupcopies-test PRIVATE Qt6::Core Qt6::Test Qt6::Concurrent)
+add_test(NAME recentbackupcopies-test COMMAND recentbackupcopies-test)
 
 find_package(Qt6 REQUIRED COMPONENTS QuickTest)
 qt_add_executable(dashboard-test tests/dashboard_test.cpp)

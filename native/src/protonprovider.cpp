@@ -103,11 +103,10 @@ bool ProtonProvider::inspect(const QString &remotePath, RemoteFile *file, QStrin
     const QJsonDocument document = QJsonDocument::fromJson(output.standardOutput.toUtf8(), &parseError);
     const QJsonObject object = document.object();
     const QJsonObject revision = object.value(QStringLiteral("activeRevision")).toObject();
+    // Storage sizes include encryption overhead and cannot verify local file contents.
     const QJsonValue size = object.contains(QStringLiteral("size"))
         ? object.value(QStringLiteral("size"))
-        : object.contains(QStringLiteral("totalStorageSize"))
-            ? object.value(QStringLiteral("totalStorageSize"))
-            : revision.value(QStringLiteral("claimedSize"));
+        : revision.value(QStringLiteral("claimedSize"));
 
     const QByteArray checksum = QByteArray::fromHex(object.value(QStringLiteral("sha256")).toString().toLatin1());
     if (parseError.error != QJsonParseError::NoError || !document.isObject() || !size.isDouble()
@@ -123,6 +122,9 @@ bool ProtonProvider::inspect(const QString &remotePath, RemoteFile *file, QStrin
     file->path = remotePath;
     file->size = static_cast<qint64>(size.toDouble());
     file->checksum = checksum;
+    if (error != nullptr) {
+        error->clear();
+    }
 
     return true;
 }

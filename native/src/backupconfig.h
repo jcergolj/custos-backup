@@ -15,6 +15,8 @@ struct BackupSet {
     BackupSchedule schedule;
     int retention = 3;
     bool onlyOnAcPower = false;
+
+    QString remoteFolder(const QString &computerName) const;
 };
 
 struct BackupConfig {
@@ -31,8 +33,12 @@ public:
 
     bool load(BackupConfig *config, QString *error = nullptr) const;
     bool save(const BackupConfig &config, QString *error = nullptr) const;
+    bool exportSets(const BackupConfig &config, QString *error = nullptr) const;
+    bool importSets(BackupConfig *config, QString *error = nullptr) const;
     QString filePath() const;
 
 private:
+    bool loadFile(BackupConfig *config, bool setsOnly, QString *error) const;
+    bool saveFile(const BackupConfig &config, bool setsOnly, QString *error) const;
     QString path;
 };

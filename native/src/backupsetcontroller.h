@@ -90,7 +90,11 @@ public:
     Q_INVOKABLE void removeCurrentSet();
     Q_INVOKABLE void removeSet(int index);
     Q_INVOKABLE void preview();
+    Q_INVOKABLE QString recentBackupFolderPath(const QString &setId) const;
+    Q_INVOKABLE void refreshRunState();
     Q_INVOKABLE bool save();
+    Q_INVOKABLE bool exportSets(const QString &filePath);
+    Q_INVOKABLE bool importSets(const QString &filePath);
     Q_INVOKABLE bool confirmCleanup();
 
 signals:
@@ -109,7 +113,6 @@ private:
     const BackupSet *currentSet() const;
     QVector<int> recentBackupIndexes() const;
     void clearPreview();
-    void refreshRunState();
 
     BackupEngine &engine;
     BackupConfigStore store;

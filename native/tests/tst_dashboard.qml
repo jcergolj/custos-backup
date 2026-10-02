@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtTest
 import "../qml" as Custos
 
@@ -12,17 +13,42 @@ TestCase {
     Component { id: windowComponent; Custos.Main {} }
 
     function init() {
+        resourceUsage.presetIndex = 0
+        resourceUsage.busy = false
+        resourceUsage.savedIndex = -1
+        protonAuth.authenticated = true
+        protonAuth.checked = true
+        protonAuth.checking = false
+        protonAuth.error = ""
+        protonAuth.signInCount = 0
+        protonAuth.refreshCount = 0
+        themeColors.colors = {
+            background: "#ffffff", foreground: "#19232e", muted: "#586575",
+            surface: "#f0f3f6", border: "#dce1e7", accent: "#245bcb",
+            highlight: "#245bcb", highlightedText: "#ffffff", brightText: "#ffffff"
+        }
         backupSetController.setNames = ["Documents", "Photos"]
         backupSetController.setIds = ["documents-id", "photos-id"]
         backupSetController.currentIndex = 0
         backupSetController.runningSetIds = []
         backupSetController.removedIndex = -1
         backupSetController.addedCount = 0
+        backupSetController.refreshCount = 0
+        backupSetController.importedPath = ""
+        backupSetController.exportedPath = ""
+        backupSetController.importSucceeds = true
         backupSetController.recentBackups = ["Photos\nNo backup run yet", "Documents\nsucceeded"]
         backupSetController.recentBackupSetIds = ["photos-id", "documents-id"]
-        backupSetController.recentBackupTimestamps = ["", "2026-10-01 10:00"]
+        backupSetController.recentBackupTimestamps = ["", "01/10/2026 10:00:00"]
         backupLauncher.launchedId = ""
         restoreController.discoveredRoot = ""
+        protonFolderBrowser.requestedPath = ""
+        protonFolderBrowser.busy = false
+        recentBackupCopies.busy = false
+        recentBackupCopies.openedId = ""
+        recentBackupCopies.deleteRequestedId = ""
+        recentBackupCopies.deleteConfirmed = false
+        recentBackupCopies.deleteCancelled = false
         app = createTemporaryObject(windowComponent, testCase)
         verify(app !== null)
         app.requestActivate()
@@ -52,16 +78,30 @@ TestCase {
         return item
     }
 
+    function visibleTexts(item) {
+        if (!item.visible) {
+            return []
+        }
+        let texts = typeof item.text === "string" ? [item.text] : []
+        for (const child of item.children || []) {
+            texts = texts.concat(visibleTexts(child))
+        }
+        return texts
+    }
+
     function test_setsAreLeftOfRecentBackups() {
         compare(control("backupSetsTitle").text, "Backup sets")
         compare(control("recentBackupsTitle").text, "Recent backups")
-        compare(control("newBackupSetButton").text, "New backup set")
+        compare(control("newBackupSetButton").text, "+")
+        compare(control("newBackupSetButton").Accessible.name, "New backup set")
         const sets = control("dashboardSetsList")
         const recent = control("recentBackupsList")
         const left = sets.mapToItem(app.contentItem, 0, 0)
         const right = recent.mapToItem(app.contentItem, 0, 0)
         verify(left.x + sets.width < right.x, "Backup sets must be in the left column")
         verify(Math.abs(left.y - right.y) < 2, "The two lists must align")
+        verify(Math.abs(recent.width - 2 * sets.width) < 2, "Recent backups must receive two-thirds of the column space")
+        verify(visibleTexts(app.contentItem).indexOf("Backups") < 0)
     }
 
     function openMenu(index) {
@@ -89,7 +129,7 @@ TestCase {
         compare(backupLauncher.launchedId, "photos-id")
         compare(backupSetController.currentIndex, 0)
         compare(app.showEditor, false)
-        compare(control("recentSummary-0").text, "Photos\nNo backup run yet")
+        compare(control("recentSummary-0").text, "Photos · No backup run yet")
         compare(control("restore-0").enabled, false)
     }
 
@@ -100,6 +140,9 @@ TestCase {
         const dialog = control("removeSetDialog")
         tryCompare(dialog, "opened", true)
         compare(dialog.setName, "Photos")
+        compare(dialog.title, "Delete backup set")
+        verify(dialog.contentItem.text.indexOf("configuration and schedule") >= 0)
+        verify(dialog.contentItem.text.indexOf("Proton Drive will remain") >= 0)
         compare(backupSetController.removedIndex, -1)
         mouseClick(dialog.standardButton(Dialog.Cancel))
         tryCompare(dialog, "visible", false)
@@ -126,6 +169,16 @@ TestCase {
         compare(openMenu(0).itemAt(1).enabled, true)
     }
 
+    function test_setDeletionUsesIdentityAfterListOrderChanges() {
+        mouseClick(openMenu(1).itemAt(3))
+        const dialog = control("removeSetDialog")
+        tryCompare(dialog, "opened", true)
+        backupSetController.setNames = ["Photos", "Documents"]
+        backupSetController.setIds = ["photos-id", "documents-id"]
+        mouseClick(dialog.standardButton(Dialog.Ok))
+        compare(backupSetController.removedIndex, 0)
+    }
+
     function test_escapeCancelsDeleteConfirmation() {
         mouseClick(openMenu(1).itemAt(3))
         const dialog = control("removeSetDialog")
@@ -145,7 +198,7 @@ TestCase {
         compare(backupSetController.currentIndex, 0)
         compare(restoreController.discoveredRoot, "/backups/documents-id")
         compare(app.showRestore, true)
-        compare(control("recentSummary-1").text, "Documents\nsucceeded")
+        compare(control("recentSummary-1").text, "Documents · succeeded · 01/10/2026 10:00:00")
     }
 
     function test_unknownHistorySetCannotRestore() {
@@ -155,35 +208,124 @@ TestCase {
         compare(restoreController.discoveredRoot, "")
     }
 
-    function test_statusVisibleWithoutRestore_data() {
+    function test_folderLinkUsesHistorySetAndRequiresActivity() {
+        compare(control("openFolder-0").enabled, false)
+        mouseClick(control("openFolder-0"))
+        compare(recentBackupCopies.openedId, "")
+        backupSetController.currentIndex = 1
+        const link = control("openFolder-1")
+        compare(link.Accessible.name, "Open Documents in Proton Drive")
+        mouseClick(link)
+        compare(recentBackupCopies.openedId, "documents-id")
+        recentBackupCopies.folderResolved("/backups/documents-id/copy-id")
+        compare(protonFolderBrowser.requestedPath, "/backups/documents-id/copy-id")
+        compare(backupSetController.currentIndex, 1)
+        compare(app.showRestore, false)
+        protonFolderBrowser.busy = true
+        compare(link.enabled, false)
+    }
+
+    function test_unknownHistorySetCannotOpenFolder() {
+        backupSetController.recentBackupSetIds = ["photos-id", "removed-id"]
+        compare(control("openFolder-1").enabled, false)
+        mouseClick(control("openFolder-1"))
+        compare(recentBackupCopies.openedId, "")
+    }
+
+    function test_notificationsAppearTopRight_data() {
         return [
             { tag: "set status", source: "set", failure: false },
             { tag: "set failure", source: "set", failure: true },
             { tag: "launcher failure", source: "launcher", failure: true },
+            { tag: "folder link failure", source: "folder", failure: true },
+            { tag: "copy delete status", source: "copies", failure: false },
+            { tag: "copy delete failure", source: "copies", failure: true },
             { tag: "restore status", source: "restore", failure: false },
             { tag: "restore failure", source: "restore", failure: true }
         ]
     }
 
-    function test_statusVisibleWithoutRestore(data) {
+    function test_notificationsAppearTopRight(data) {
         const controller = data.source === "set" ? backupSetController
-            : data.source === "launcher" ? backupLauncher : restoreController
+            : data.source === "launcher" ? backupLauncher
+            : data.source === "folder" ? protonFolderBrowser
+            : data.source === "copies" ? recentBackupCopies : restoreController
         const message = data.failure ? "Permission denied" : "Preview ready"
         if (data.failure) {
             controller.failed(message)
         } else {
             controller.statusChanged(message)
         }
-        const status = control("dashboardStatusLabel")
+        const toast = control("notificationToast")
+        const status = control("notificationMessageLabel")
         compare(status.text, message)
-        verify(status.visible)
+        tryCompare(toast, "opened", true)
+        compare(toast.x + toast.width, app.width - app.contentPadding)
+        compare(toast.y, app.contentPadding)
+        compare(findChild(app, "dashboardStatusLabel"), null)
         compare(app.showRestore, false)
+        if (dashboardScreenshotPath.length > 0 && data.source === "set" && !data.failure) {
+            grabImage(app.contentItem).save(dashboardScreenshotPath + ".notification.png")
+        }
     }
 
-    function test_launcherStartedStatusVisible() {
+    function test_notificationTimeoutRestartsForNewMessage() {
+        backupSetController.statusChanged("First message")
+        const toast = control("notificationToast")
+        tryCompare(toast, "opened", true)
+        wait(2500)
+        backupSetController.statusChanged("Second message")
+        wait(3000)
+        verify(toast.visible, "A new notification must get its own five-second timeout")
+        compare(control("notificationMessageLabel").text, "Second message")
+        tryCompare(toast, "visible", false, 2500)
+    }
+
+    function test_launcherStartedClearsBottomStatus() {
+        backupLauncher.failed("Previous launch failed")
+        verify(control("notificationToast").visible)
         backupLauncher.started()
-        compare(control("dashboardStatusLabel").text, "Backup started.")
-        verify(control("dashboardStatusLabel").visible)
+        compare(control("notificationMessageLabel").text, "")
+        verify(!control("notificationToast").visible)
+    }
+
+    function openRecentMenu(index) {
+        mouseClick(control("recentActions-" + index))
+        const menu = control("recentMenu-" + index)
+        tryCompare(menu, "opened", true)
+        return menu
+    }
+
+    function test_deleteRecentCopyRequiresConfirmationAndCancelIsSafe() {
+        compare(openRecentMenu(0).itemAt(0).enabled, false)
+        control("recentMenu-0").close()
+        mouseClick(openRecentMenu(1).itemAt(0))
+        const dialog = control("deleteCopyDialog")
+        tryCompare(dialog, "opened", true)
+        compare(recentBackupCopies.deleteRequestedId, "documents-id")
+        compare(dialog.copyPath, "/backups/documents-id/copy-id")
+        verify(dialog.contentItem.text.indexOf("Proton Drive Trash") >= 0)
+        if (dashboardScreenshotPath.length > 0) {
+            grabImage(app.contentItem).save(dashboardScreenshotPath + ".copy-warning.png")
+        }
+        compare(recentBackupCopies.deleteConfirmed, false)
+        mouseClick(dialog.standardButton(Dialog.Cancel))
+        tryCompare(dialog, "visible", false)
+        compare(recentBackupCopies.deleteCancelled, true)
+        compare(recentBackupCopies.deleteConfirmed, false)
+        mouseClick(openRecentMenu(1).itemAt(0))
+        tryCompare(dialog, "opened", true)
+        mouseClick(dialog.standardButton(Dialog.Ok))
+        compare(recentBackupCopies.deleteConfirmed, true)
+        recentBackupCopies.copyDeleted("documents-id")
+        compare(backupSetController.refreshCount, 1)
+    }
+
+    function test_runningRecentCopyCannotBeDeleted() {
+        backupSetController.runningSetIds = ["documents-id"]
+        const menu = openRecentMenu(1)
+        compare(menu.itemAt(0).enabled, false)
+        menu.close()
     }
 
     function test_newSetStillOpensTheEditor() {
@@ -191,6 +333,74 @@ TestCase {
         compare(backupSetController.addedCount, 1)
         compare(app.showEditor, true)
         compare(control("setNameField").text, "New set")
+    }
+
+    function test_importAndExportUseChosenLocalFiles() {
+        compare(control("importSetsButton").text, "Import")
+        compare(control("exportSetsButton").text, "Export")
+        const exportDialog = control("exportSetsDialog")
+        compare(exportDialog.fileMode, FileDialog.SaveFile)
+        exportDialog.selectedFile = "file:///tmp/backup%20sets.json"
+        exportDialog.accepted()
+        compare(backupSetController.exportedPath, "/tmp/backup sets.json")
+        mouseClick(control("newBackupSetButton"))
+        compare(app.showEditor, true)
+        const importDialog = control("importSetsDialog")
+        importDialog.selectedFile = dashboardImportFileUrl
+        importDialog.accepted()
+        compare(backupSetController.importedPath, dashboardImportFilePath)
+        compare(app.showEditor, false)
+    }
+
+    function test_failedImportKeepsEditorOpen() {
+        mouseClick(control("newBackupSetButton"))
+        backupSetController.importSucceeds = false
+        const dialog = control("importSetsDialog")
+        dialog.selectedFile = dashboardInvalidImportFileUrl
+        dialog.accepted()
+        compare(app.showEditor, true)
+    }
+
+    function test_editorCloseButtonReturnsToDashboard_data() {
+        return [
+            { tag: "create", creating: true },
+            { tag: "edit", creating: false }
+        ]
+    }
+
+    function test_editorCloseButtonReturnsToDashboard(data) {
+        if (data.creating) {
+            mouseClick(control("newBackupSetButton"))
+        } else {
+            mouseClick(openMenu(0).itemAt(0))
+        }
+        tryCompare(app, "showEditor", true)
+        waitForRendering(app.contentItem)
+        const close = control("closeEditorButton")
+        compare(close.text, "×")
+        compare(close.Accessible.name, "Close editor")
+        const actions = control("editorActionsRow")
+        const buttons = actions.children.filter(function (item) { return item instanceof Button })
+        compare(buttons.length, 2)
+        compare(buttons[0].text, "Save")
+        compare(buttons[1].text, "Preview")
+        const texts = visibleTexts(app.contentItem)
+        verify(!texts.some(function (text) { return text.startsWith("Give your backup a name") }))
+        verify(!texts.some(function (text) { return text.startsWith("Included files (") }))
+        verify(!texts.some(function (text) { return text.startsWith("Excluded:") }))
+        verify(!texts.some(function (text) { return text.startsWith("Run state:") }))
+        const advancedButton = control("advancedSettingsButton")
+        const save = control("saveBackupSetButton")
+        verify(save.mapToItem(app.contentItem, 0, 0).y
+            > advancedButton.mapToItem(app.contentItem, 0, advancedButton.height).y)
+        app.showAdvanced = true
+        waitForRendering(app.contentItem)
+        const advancedPanel = control("advancedSettingsPanel")
+        verify(save.mapToItem(app.contentItem, 0, 0).y
+            > advancedPanel.mapToItem(app.contentItem, 0, advancedPanel.height).y)
+        mouseClick(close)
+        tryCompare(app, "showEditor", false)
+        compare(backupLauncher.launchedId, "")
     }
 
     function test_keyboardMenuNavigationAndEscape() {
@@ -209,6 +419,24 @@ TestCase {
         keyClick(Qt.Key_Return)
         tryCompare(app, "showEditor", true)
         compare(backupSetController.currentIndex, 1)
+    }
+
+    function test_sourcePickerMenuOpensBelowPlusButton() {
+        mouseClick(control("newBackupSetButton"))
+        tryCompare(app, "showEditor", true)
+        waitForRendering(app.contentItem)
+        const button = control("addSourceButton")
+        mouseClick(button)
+        const menu = control("sourceMenu")
+        tryCompare(menu, "opened", true)
+        compare(menu.parent, button)
+        compare(menu.itemAt(0).text, "Add files")
+        compare(menu.itemAt(1).text, "Add folder")
+        const buttonBottom = button.mapToItem(app.contentItem, 0, button.height)
+        const menuTop = menu.contentItem.mapToItem(app.contentItem, 0, 0)
+        verify(menuTop.y >= buttonBottom.y, "Source choices must open below the + button")
+        verify(Math.abs(menuTop.x + menu.contentItem.width - buttonBottom.x - button.width) < 16)
+        menu.close()
     }
 
     function test_outsideClickDismissesMenu() {
@@ -230,6 +458,8 @@ TestCase {
         verify(control("emptySetsLabel").visible)
         verify(control("emptyRecentLabel").visible)
         verify(control("newBackupSetButton").enabled)
+        verify(control("importSetsButton").enabled)
+        verify(!control("exportSetsButton").enabled)
     }
 
     function test_minimumWindowAndLongHistoryStayWithinColumns() {
@@ -239,15 +469,19 @@ TestCase {
         waitForRendering(app.contentItem)
         const sets = control("dashboardSetsList")
         const recent = control("recentBackupsList")
-        verify(sets.width >= 300)
-        verify(recent.width >= 300)
+        verify(sets.width >= 200)
+        verify(Math.abs(recent.width - 2 * sets.width) < 2)
         const restore = control("restore-0")
         const position = restore.mapToItem(app.contentItem, 0, 0)
         verify(position.x + restore.width <= app.width - app.contentPadding)
         verify(position.y + restore.height <= app.height)
         const summary = control("recentSummary-0")
-        verify(summary.implicitHeight > 40)
-        verify(recent.contentHeight >= summary.implicitHeight)
+        compare(summary.wrapMode, Text.NoWrap)
+        compare(summary.maximumLineCount, 1)
+        compare(summary.elide, Text.ElideRight)
+        verify(summary.text.indexOf("\n") < 0)
+        verify(summary.implicitHeight < 40)
+        verify(summary.truncated)
         if (dashboardScreenshotPath.length > 0) {
             grabImage(app.contentItem).save(dashboardScreenshotPath + ".minimum.png")
         }
@@ -278,7 +512,46 @@ TestCase {
         compare(backupLauncher.launchedId, "backup-id-14")
     }
 
-    function test_lightPaletteOverridesDarkHost() {
+    function test_signInIsShownOnlyWhenDisconnected() {
+        const signIn = control("protonSignInButton")
+        compare(signIn.visible, false)
+        protonAuth.authenticated = false
+        tryCompare(signIn, "visible", true)
+        waitForRendering(app.contentItem)
+        mouseClick(signIn)
+        compare(protonAuth.signInCount, 1)
+        protonAuth.checking = true
+        tryCompare(signIn, "enabled", false)
+        mouseClick(signIn)
+        compare(protonAuth.signInCount, 1)
+        protonAuth.checking = false
+        const refreshCount = protonAuth.refreshCount
+        waitForRendering(app.contentItem)
+        mouseClick(control("protonAuthRetryButton"))
+        compare(protonAuth.refreshCount, refreshCount + 1)
+        protonAuth.authenticated = true
+        tryCompare(signIn, "visible", false)
+        compare(control("protonAuthRetryButton").visible, false)
+    }
+
+    function test_resourceUsageOffersFiveGlobalPresetsAndSavesSelection() {
+        mouseClick(openMenu(0).itemAt(0))
+        app.showAdvanced = true
+        const preset = control("resourceUsagePreset")
+        compare(preset.count, 5)
+        compare(preset.model, ["Very low", "Low", "Medium", "High", "Very high"])
+        compare(preset.currentIndex, 0)
+        preset.currentIndex = 4
+        compare(control("resourceUsageDescription").text, "CPU limit: 200%")
+        const save = control("saveBackupSetButton")
+        save.clicked()
+        compare(resourceUsage.savedIndex, 4)
+        resourceUsage.busy = true
+        compare(save.enabled, false)
+        compare(preset.enabled, false)
+    }
+
+    function test_themePaletteAndLiveChanges() {
         compare(app.palette.window, "#ffffff")
         compare(app.palette.windowText, "#19232e")
         compare(app.palette.disabled.buttonText, "#586575")
@@ -289,5 +562,20 @@ TestCase {
         if (dashboardScreenshotPath.length > 0) {
             image.save(dashboardScreenshotPath)
         }
+        themeColors.colors = {
+            background: "#060606", foreground: "#f0d4e4", muted: "#626262",
+            surface: "#1f1f1e", border: "#393339", accent: "#9b6b9f",
+            highlight: "#f0d4e4", highlightedText: "#060606", brightText: "#f4deea"
+        }
+        tryCompare(app.palette, "window", "#060606")
+        compare(app.palette.windowText, "#f0d4e4")
+        compare(app.palette.highlight, "#f0d4e4")
+        compare(app.palette.highlightedText, "#060606")
+        tryCompare(app.palette.disabled, "buttonText", "#626262")
+        compare(control("newBackupSetButton").palette.buttonText, "#f0d4e4")
+        tryCompare(control("restore-0").palette.disabled, "buttonText", "#626262")
+        waitForRendering(app.contentItem)
+        const darkImage = grabImage(app.contentItem)
+        compare(darkImage.pixel(app.width - 8, app.height - 8), "#060606")
     }
 }

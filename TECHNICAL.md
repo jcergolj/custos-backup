@@ -39,7 +39,26 @@ configurations, run history, cleanup decisions, and remote manifests.
 Legacy `required_volumes` settings are ignored on load and omitted on save;
 backups no longer wait for external drives to be mounted.
 
+Backup-set exports use a version-1 JSON document with `application: "custos"`
+and a `sets` array. They contain the saved set definitions, without the CLI
+executable, run history, cleanup decisions, files, or credentials. Import validates
+the whole document before replacing the set list and preserves the local CLI
+executable setting. Import is blocked while a worker or queue update is active.
+
+Exclusions containing a path separator match that path and its descendants.
+Bare names such as `node_modules` match directory names at every depth; regular
+files with the same name remain included. Matching is exact and case-sensitive.
+Excluded symbolic links and unreadable paths do not mark a copy incomplete.
+
 ## Provider Behavior
+
+The UI checks the CLI connection asynchronously with
+`filesystem info /my-files --json` at startup, when the window becomes active,
+and every 30 seconds.
+When disconnected, **Sign in to Proton** launches the configured CLI's `auth login`
+through `xdg-terminal-exec`. Credentials remain managed by Proton's CLI.
+Connection failures also expose a retry button and the CLI error in the sign-in
+button's tooltip.
 
 The Proton Drive provider uses the official CLI for:
 
@@ -48,9 +67,23 @@ The Proton Drive provider uses the official CLI for:
 - discovery through `filesystem list`;
 - cleanup through per-item `trash` followed by `delete`.
 
-Custos never calls `empty-trash`. Remote size is verified after upload and
-download. The manifest records the local SHA-256 checksum; a provider SHA-256
+Custos never calls `empty-trash`. Remote content size is verified after upload and
+download using `size` or `activeRevision.claimedSize`, not encrypted storage size.
+The manifest records the local SHA-256 checksum; a provider SHA-256
 field is used when the CLI exposes one.
+
+Recent-backup browser links open the copy recorded for that run in
+the signed-in Proton Drive web app. Custos resolves the folder's node ID and an
+ancestor's share ID through read-only CLI metadata requests in the background;
+it does not create public sharing links.
+
+Runs persist the exact copy folder as `remote_copy_path`. For older run records,
+Custos identifies the newest matching manifest inside that backup's folder and
+remembers its path. Browsing and manual deletion use the same recorded copy.
+Manual deletion requires confirmation of the exact path, rechecks its Custos
+manifest and identity, and moves that copy to Proton Drive Trash. Older copies
+and the backup set remain; the deleted entry disappears from Recent backups.
+Worker and run-state locks prevent deletion during a backup or queue update.
 
 ## Retention And Cleanup
 
@@ -70,6 +103,15 @@ Restores are limited to manifest entries that passed verification. Destination
 traversal and symbolic-link escapes are rejected. The default destination is a
 separate folder, and restore metadata is not added to the local backup queue.
 
+## Desktop Theme
+
+The UI reads Omarchy's `colors.toml` from `$XDG_STATE_HOME/omarchy/current/theme`
+(default `~/.local/state`) or the legacy `$XDG_CONFIG_HOME/omarchy/current/theme`
+(default `~/.config`). File and directory watches pick up palette edits and
+whole-directory replacements during theme switches. Missing or invalid palettes
+fall back to the system Qt palette. UI surfaces, text, controls, selections, and
+disabled colors share these live palette roles.
+
 ## Services And Packaging
 
 The package installs these user units:
@@ -80,6 +122,22 @@ The package installs these user units:
 ```
 
 The worker runs at low priority with idle I/O scheduling and a 10% CPU quota.
+The **Resource usage (all backups)** control offers five global presets:
+very low (10%, nice 19), low (25%, nice 15), medium (50%, nice 10), high (100%,
+nice 5), and very high (200%, nice 0). Very low and low use idle I/O scheduling;
+medium, high, and very high use best-effort I/O with priorities 7, 5, and 4.
+
+Saving a changed preset writes a managed drop-in at
+`$XDG_CONFIG_HOME/systemd/user/custos.service.d/50-custos-resources.conf`
+(default `~/.config/systemd/user/...`) and asynchronously runs
+`systemctl --user daemon-reload`. Reload failures restore the previous file and
+report an error. No root privileges are required. The drop-in is also the
+persistent preset store; backup-set import/export does not change it.
+Both manual and scheduled backups start the same service, so the limits apply
+to the worker and its CLI subprocesses from the next worker start. A running
+backup is not restarted. Quotas are measured against one CPU core, so 200%
+permits up to two cores. Priorities never exceed normal (`nice=0`).
+
 The timer is intentionally not enabled by the package install hook because the
 CLI must be authenticated and a backup must exist first.
 

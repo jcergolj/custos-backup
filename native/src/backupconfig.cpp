@@ -26,6 +26,19 @@ bool validSchedule(const BackupSchedule &schedule)
 
 }
 
+QString BackupSet::remoteFolder(const QString &computerName) const
+{
+    const auto segment = [](const QString &value) {
+        QString result;
+        for (const QChar character : value.trimmed()) {
+            result.append(character.isLetterOrNumber() || character == '-' || character == '_' || character == '.'
+                ? character : QChar('_'));
+        }
+        return result.isEmpty() ? QStringLiteral("computer") : result;
+    };
+    return QDir(remoteRoot).filePath(QDir(segment(computerName)).filePath(segment(name)));
+}
+
 BackupConfigStore::BackupConfigStore(QString path)
     : path(std::move(path))
 {
@@ -37,6 +50,16 @@ QString BackupConfigStore::filePath() const
 }
 
 bool BackupConfigStore::load(BackupConfig *config, QString *error) const
+{
+    return loadFile(config, false, error);
+}
+
+bool BackupConfigStore::importSets(BackupConfig *config, QString *error) const
+{
+    return loadFile(config, true, error);
+}
+
+bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *error) const
 {
     if (config == nullptr) {
         if (error != nullptr) {
@@ -63,6 +86,15 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
             *error = QStringLiteral("The Custos backup configuration is malformed.");
         }
 
+        return false;
+    }
+
+    if (setsOnly && (object.value(QStringLiteral("application")).toString() != QStringLiteral("custos")
+        || object.value(QStringLiteral("version")).toInt() != 1
+        || !object.value(QStringLiteral("sets")).isArray())) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Choose a backup-set JSON file exported from Custos.");
+        }
         return false;
     }
 
@@ -167,7 +199,17 @@ bool BackupConfigStore::load(BackupConfig *config, QString *error) const
 
 bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
 {
-    if (config.protonBinary.isEmpty()) {
+    return saveFile(config, false, error);
+}
+
+bool BackupConfigStore::exportSets(const BackupConfig &config, QString *error) const
+{
+    return saveFile(config, true, error);
+}
+
+bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QString *error) const
+{
+    if (!setsOnly && config.protonBinary.isEmpty()) {
         if (error != nullptr) {
             *error = QStringLiteral("The Custos backup configuration is incomplete.");
         }
@@ -175,9 +217,13 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
         return false;
     }
 
-    QJsonObject object {
-        {QStringLiteral("proton_binary"), config.protonBinary},
-    };
+    QJsonObject object;
+    if (setsOnly) {
+        object.insert(QStringLiteral("application"), QStringLiteral("custos"));
+        object.insert(QStringLiteral("version"), 1);
+    } else {
+        object.insert(QStringLiteral("proton_binary"), config.protonBinary);
+    }
 
     if (!config.sets.isEmpty()) {
         QJsonArray sets;
@@ -230,7 +276,7 @@ bool BackupConfigStore::save(const BackupConfig &config, QString *error) const
             });
         }
         object.insert(QStringLiteral("sets"), sets);
-    } else if (!config.sourceDirectory.isEmpty() && !config.remoteRoot.isEmpty()) {
+    } else if (!setsOnly && !config.sourceDirectory.isEmpty() && !config.remoteRoot.isEmpty()) {
         object.insert(QStringLiteral("source_directory"), config.sourceDirectory);
         object.insert(QStringLiteral("remote_root"), config.remoteRoot);
     } else {

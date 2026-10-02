@@ -9,7 +9,8 @@ url='https://github.com/jcergolj/custos-backup'
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative')
 makedepends=('cmake' 'gcc')
-optdepends=('proton-drive: Proton Drive CLI used for backup storage')
+optdepends=('proton-drive: Proton Drive CLI used for backup storage'
+            'xdg-terminal-exec: Open the Proton CLI sign-in in your preferred terminal')
 provides=('custos')
 conflicts=('custos')
 install='custos.install'

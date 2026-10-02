@@ -24,6 +24,9 @@ private slots:
     void uploadUsesJsonCliArguments();
     void inspectParsesVerifiedMetadata();
     void inspectParsesCliMetadataWithoutSha256();
+    void inspectUsesContentSizeInsteadOfEncryptedStorageSize();
+    void inspectRejectsStorageSizeWithoutContentSize();
+    void successfulInspectClearsEarlierErrors();
     void commandErrorsAreActionable();
     void rejectsNullMetadataOutput();
     void listsRemoteItemsAndUsesExactCleanupCommands();
@@ -70,6 +73,48 @@ void ProtonProviderTest::inspectParsesCliMetadataWithoutSha256()
     QVERIFY(provider.inspect(QStringLiteral("/backups/file.txt"), &file));
     QCOMPARE(file.size, qint64(17));
     QVERIFY(file.checksum.isEmpty());
+}
+
+void ProtonProviderTest::inspectUsesContentSizeInsteadOfEncryptedStorageSize()
+{
+    FakeRunner runner;
+    runner.response.exitCode = 0;
+    runner.response.standardOutput = QStringLiteral(R"({"type":"file","totalStorageSize":463208,"activeRevision":{"storageSize":463208,"claimedSize":463105}})");
+    ProtonProvider provider(runner);
+    RemoteFile file;
+
+    QVERIFY(provider.inspect(QStringLiteral("/backups/file.pdf"), &file));
+    QCOMPARE(file.size, qint64(463105));
+}
+
+void ProtonProviderTest::inspectRejectsStorageSizeWithoutContentSize()
+{
+    FakeRunner runner;
+    runner.response.exitCode = 0;
+    runner.response.standardOutput = QStringLiteral(R"({"type":"file","totalStorageSize":513,"activeRevision":{"storageSize":513}})");
+    ProtonProvider provider(runner);
+    RemoteFile file;
+    QString error;
+
+    QVERIFY(!provider.inspect(QStringLiteral("/backups/manifest.json"), &file, &error));
+    QCOMPARE(error, QStringLiteral("Proton Drive returned invalid file metadata."));
+}
+
+void ProtonProviderTest::successfulInspectClearsEarlierErrors()
+{
+    FakeRunner runner;
+    runner.response.exitCode = 1;
+    runner.response.standardError = QStringLiteral("Node not found: file.txt");
+    ProtonProvider provider(runner);
+    RemoteFile file;
+    QString error;
+
+    QVERIFY(!provider.inspect(QStringLiteral("/backups/file.txt"), &file, &error));
+    QCOMPARE(error, QStringLiteral("Node not found: file.txt"));
+
+    runner.response = {0, QStringLiteral(R"({"activeRevision":{"claimedSize":17}})"), {}};
+    QVERIFY(provider.inspect(QStringLiteral("/backups/file.txt"), &file, &error));
+    QVERIFY(error.isEmpty());
 }
 
 void ProtonProviderTest::commandErrorsAreActionable()

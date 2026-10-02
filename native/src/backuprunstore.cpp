@@ -72,6 +72,7 @@ bool BackupRunStore::load(QString *error)
         record.nextScheduled = readDate(object, QStringLiteral("next_scheduled"));
         record.lastSuccess = readDate(object, QStringLiteral("last_success"));
         record.lastFailure = readDate(object, QStringLiteral("last_failure"));
+        record.remoteCopyPath = object.value(QStringLiteral("remote_copy_path")).toString();
         if (record.setId.isEmpty()) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup run state contains an invalid record.");
@@ -101,6 +102,7 @@ bool BackupRunStore::save(QString *error) const
             {QStringLiteral("reason"), record.reason},
             {QStringLiteral("last_error"), record.lastError},
             {QStringLiteral("attempts"), record.attempts},
+            {QStringLiteral("remote_copy_path"), record.remoteCopyPath},
         };
         writeDate(object, QStringLiteral("scheduled_for"), record.scheduledFor);
         writeDate(object, QStringLiteral("next_attempt"), record.nextAttempt);

@@ -32,10 +32,22 @@ bool isWithinPath(const QString &path, const QString &root)
         : cleanPath.startsWith(cleanRoot + QDir::separator()));
 }
 
-bool isExcluded(const QString &path, const QStringList &exclusions)
+bool isExcluded(const QFileInfo &file, const QStringList &exclusions)
 {
-    return std::any_of(exclusions.cbegin(), exclusions.cend(), [&path](const QString &exclusion) {
-        return isWithinPath(path, cleanAbsolutePath(exclusion));
+    const QString path = file.absoluteFilePath();
+    QStringList folders = file.absolutePath().split('/', Qt::SkipEmptyParts);
+    if (file.isDir() || file.isSymLink()) {
+        folders.append(file.fileName());
+    }
+    return std::any_of(exclusions.cbegin(), exclusions.cend(), [&path, &folders](const QString &exclusion) {
+        if (exclusion.trimmed().isEmpty()) {
+            return false;
+        }
+        const QString rule = QDir::cleanPath(exclusion.trimmed());
+        if (!rule.contains('/') && rule != QStringLiteral(".") && rule != QStringLiteral("..")) {
+            return folders.contains(rule);
+        }
+        return isWithinPath(path, cleanAbsolutePath(rule));
     });
 }
 
@@ -148,12 +160,12 @@ BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const 
             missing.append(source.absoluteFilePath());
             continue;
         }
-        if (source.isSymLink() || !source.isReadable()) {
-            skipped.append(source.absoluteFilePath());
+        if (isExcluded(source, exclusions)) {
+            excluded.append(source.absoluteFilePath());
             continue;
         }
-        if (isExcluded(source.absoluteFilePath(), exclusions)) {
-            excluded.append(source.absoluteFilePath());
+        if (source.isSymLink() || !source.isReadable()) {
+            skipped.append(source.absoluteFilePath());
             continue;
         }
         if (source.isFile()) {
@@ -171,14 +183,16 @@ BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const 
             const QFileInfo file = iterator.fileInfo();
             const QString path = file.absoluteFilePath();
 
-            if (file.isSymLink()) {
+            if (isExcluded(file, exclusions)) {
+                if (file.isFile() || file.isSymLink()) {
+                    excluded.append(path);
+                }
+            } else if (file.isSymLink()) {
                 skipped.append(path);
             } else if (file.isDir() && !file.isReadable()) {
                 skipped.append(path);
             } else if (file.isFile() && !file.isReadable()) {
                 skipped.append(path);
-            } else if (file.isFile() && isExcluded(path, exclusions)) {
-                excluded.append(path);
             } else if (file.isFile()) {
                 included.append(path);
             }

@@ -11,6 +11,7 @@ pkgbase = custos-git
 	depends = qt6-base
 	depends = qt6-declarative
 	optdepends = proton-drive: Proton Drive CLI used for backup storage
+	optdepends = xdg-terminal-exec: Open the Proton CLI sign-in in your preferred terminal
 	provides = custos
 	conflicts = custos
 	source = custos-git::git+https://github.com/jcergolj/custos-backup.git

@@ -18,6 +18,9 @@ private slots:
     void backsUpStoresVerifiedChecksum();
     void reservesManifestPathForSourceFiles();
     void previewsMultipleSourcesAndExclusions();
+    void excludesMatchingFolderNamesAtEveryDepth_data();
+    void excludesMatchingFolderNamesAtEveryDepth();
+    void absoluteExclusionDoesNotExcludeSameNamedFoldersElsewhere();
     void backsUpMultipleSourcesWithoutCollisions();
     void preservesVerifiedItemsInAnIncompleteCopy();
     void reusesAnExistingVerifiedCopyOnRetry();
@@ -171,6 +174,68 @@ void BackupEngineTest::previewsMultipleSourcesAndExclusions()
     QCOMPARE(preview.excludedFiles, QStringList {excluded.fileName()});
     QVERIFY(preview.includedFiles.contains(included.fileName()));
     QVERIFY(preview.includedFiles.contains(secondFile.fileName()));
+}
+
+void BackupEngineTest::excludesMatchingFolderNamesAtEveryDepth_data()
+{
+    QTest::addColumn<QString>("rule");
+    QTest::newRow("folder name") << QStringLiteral("node_modules");
+    QTest::newRow("trailing slash") << QStringLiteral("node_modules/");
+}
+
+void BackupEngineTest::excludesMatchingFolderNamesAtEveryDepth()
+{
+    QFETCH(QString, rule);
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid());
+    QVERIFY(remote.isValid());
+    const QStringList included {QStringLiteral("src/app.js"), QStringLiteral("node_modules-old/keep.js"), QStringLiteral("notes/node_modules")};
+    const QStringList excluded {QStringLiteral("node_modules/package/index.js"), QStringLiteral("projects/app/node_modules/dependency/index.js")};
+    for (const QString &relative : included + excluded) {
+        QVERIFY(QDir().mkpath(QFileInfo(source.filePath(relative)).path()));
+        QFile file(source.filePath(relative));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("content");
+    }
+    const QString link = source.filePath(QStringLiteral("node_modules/linked-package"));
+    QVERIFY(QFile::link(source.filePath(QStringLiteral("src/app.js")), link));
+
+    BackupEngine engine;
+    const BackupPreview preview = engine.preview({source.path()}, {rule});
+    QCOMPARE(preview.includedFiles.size(), included.size());
+    QCOMPARE(preview.excludedFiles.size(), excluded.size() + 1);
+    QVERIFY(preview.excludedFiles.contains(link));
+    QVERIFY(preview.skippedPaths.isEmpty());
+    for (const QString &relative : included) QVERIFY(preview.includedFiles.contains(source.filePath(relative)));
+    for (const QString &relative : excluded) QVERIFY(preview.excludedFiles.contains(source.filePath(relative)));
+
+    LocalProvider provider(remote.path());
+    QString manifestPath;
+    QString error;
+    QVERIFY2(engine.backup({source.path()}, QStringLiteral("copy"), {rule}, provider, &manifestPath, &error), qPrintable(error));
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifestPath, &entries, &error));
+    QCOMPARE(entries.size(), included.size());
+    QVERIFY(!QFileInfo::exists(remote.filePath(QStringLiteral("copy/node_modules"))));
+    QVERIFY(!QFileInfo::exists(remote.filePath(QStringLiteral("copy/projects/app/node_modules"))));
+}
+
+void BackupEngineTest::absoluteExclusionDoesNotExcludeSameNamedFoldersElsewhere()
+{
+    QTemporaryDir source;
+    QVERIFY(source.isValid());
+    for (const QString &project : {QStringLiteral("one"), QStringLiteral("two")}) {
+        const QString folder = source.filePath(project + QStringLiteral("/node_modules"));
+        QVERIFY(QDir().mkpath(folder));
+        QFile file(QDir(folder).filePath(QStringLiteral("index.js")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("content");
+    }
+    BackupEngine engine;
+    const BackupPreview preview = engine.preview({source.path()}, {source.filePath(QStringLiteral("one/node_modules"))});
+    QCOMPARE(preview.includedFiles, QStringList {source.filePath(QStringLiteral("two/node_modules/index.js"))});
+    QCOMPARE(preview.excludedFiles, QStringList {source.filePath(QStringLiteral("one/node_modules/index.js"))});
 }
 
 void BackupEngineTest::backsUpMultipleSourcesWithoutCollisions()

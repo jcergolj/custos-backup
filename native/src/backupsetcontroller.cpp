@@ -2,6 +2,8 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QLockFile>
+#include <QSysInfo>
 #include <QUuid>
 
 #include <algorithm>
@@ -331,10 +333,20 @@ QStringList BackupSetController::recentBackupTimestamps() const
             latest = record->lastScheduled;
         }
         timestamps.append(latest.isValid()
-            ? latest.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"))
+            ? latest.toLocalTime().toString(QStringLiteral("dd/MM/yyyy HH:mm:ss"))
             : QString());
     }
     return timestamps;
+}
+
+QString BackupSetController::recentBackupFolderPath(const QString &setId) const
+{
+    for (const BackupSet &set : config.sets) {
+        if (set.id == setId) {
+            return set.remoteFolder(QSysInfo::machineHostName());
+        }
+    }
+    return {};
 }
 
 QStringList BackupSetController::previewIncluded() const
@@ -414,6 +426,7 @@ void BackupSetController::removeSet(int index)
     emit currentSetChanged();
     emit dashboardChanged();
     clearPreview();
+    emit statusChanged(QStringLiteral("Backup set removed."));
 }
 
 void BackupSetController::preview()
@@ -428,11 +441,7 @@ void BackupSetController::preview()
 
     previewResult = engine.preview(set->sourceDirectories, set->exclusions);
     emit previewChanged();
-    emit statusChanged(QStringLiteral("%1 included, %2 excluded, %3 skipped, %4 missing.")
-        .arg(previewResult.includedFiles.size())
-        .arg(previewResult.excludedFiles.size())
-        .arg(previewResult.skippedPaths.size())
-        .arg(previewResult.missingPaths.size()));
+    emit statusChanged(QString());
 }
 
 bool BackupSetController::save()
@@ -453,6 +462,60 @@ bool BackupSetController::save()
     }
 
     emit statusChanged(QStringLiteral("Backup saved."));
+    return true;
+}
+
+bool BackupSetController::exportSets(const QString &filePath)
+{
+    const QFileInfo destination(filePath);
+    for (const QString &statePath : {store.filePath(), runStore.filePath(), cleanupStore.filePath()}) {
+        const QFileInfo state(statePath);
+        if (QDir::cleanPath(destination.absoluteFilePath()) == QDir::cleanPath(state.absoluteFilePath())
+            || (!destination.canonicalFilePath().isEmpty() && destination.canonicalFilePath() == state.canonicalFilePath())) {
+            emit failed(QStringLiteral("Choose a separate file for exporting your backup sets."));
+            return false;
+        }
+    }
+    BackupConfig saved;
+    QString error;
+    if (!store.load(&saved, &error) || !BackupConfigStore(filePath).exportSets(saved, &error)) {
+        emit failed(error);
+        return false;
+    }
+    emit statusChanged(QStringLiteral("Backup sets exported."));
+    return true;
+}
+
+bool BackupSetController::importSets(const QString &filePath)
+{
+    BackupConfig imported;
+    QString error;
+    if (!BackupConfigStore(filePath).importSets(&imported, &error)) {
+        emit failed(error);
+        return false;
+    }
+    QLockFile workerLock(store.filePath() + QStringLiteral(".worker.lock"));
+    QLockFile runLock(runStore.filePath() + QStringLiteral(".lock"));
+    if (!workerLock.tryLock(0) || !runLock.tryLock(0)) {
+        emit failed(QStringLiteral("Wait for the current backup or queue update to finish before importing sets."));
+        return false;
+    }
+    BackupConfig updated = config;
+    updated.sets = imported.sets;
+    updated.sourceDirectory.clear();
+    updated.remoteRoot.clear();
+    if (!store.save(updated, &error)) {
+        emit failed(error);
+        return false;
+    }
+    config = updated;
+    selectedIndex = config.sets.isEmpty() ? -1 : 0;
+    clearPreview();
+    emit setsChanged();
+    emit currentIndexChanged();
+    emit currentSetChanged();
+    emit dashboardChanged();
+    emit statusChanged(QStringLiteral("Backup sets imported."));
     return true;
 }
 
@@ -492,7 +555,10 @@ QVector<int> BackupSetController::recentBackupIndexes() const
     QVector<int> indexes;
     indexes.reserve(config.sets.size());
     for (int index = 0; index < config.sets.size(); ++index) {
-        indexes.append(index);
+        const BackupRunRecord *record = runStore.find(config.sets.at(index).id);
+        if (record == nullptr || record->status != QStringLiteral("copy_deleted")) {
+            indexes.append(index);
+        }
     }
 
     const auto latestActivity = [this](int index) {

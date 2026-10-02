@@ -1,6 +1,39 @@
 import QtQuick
 
 QtObject {
+    property QtObject resourceUsage: QtObject {
+        property var names: ["Very low", "Low", "Medium", "High", "Very high"]
+        property var descriptions: ["CPU limit: 10%", "CPU limit: 25%", "CPU limit: 50%", "CPU limit: 100%", "CPU limit: 200%"]
+        property int presetIndex: 0
+        property bool busy: false
+        property int savedIndex: -1
+        signal presetChanged()
+        signal statusChanged(string message)
+        signal failed(string error)
+        function save(index) { savedIndex = index }
+    }
+
+    property QtObject protonAuth: QtObject {
+        property bool authenticated: true
+        property bool checked: true
+        property bool checking: false
+        property string error: ""
+        property int signInCount: 0
+        property int refreshCount: 0
+        signal statusChanged(string message)
+        signal failed(string error)
+        function signIn() { signInCount++ }
+        function refresh() { refreshCount++ }
+    }
+
+    property QtObject themeColors: QtObject {
+        property var colors: ({
+            background: "#ffffff", foreground: "#19232e", muted: "#586575",
+            surface: "#f0f3f6", border: "#dce1e7", accent: "#245bcb",
+            highlight: "#245bcb", highlightedText: "#ffffff", brightText: "#ffffff"
+        })
+    }
+
     property QtObject backupSetController: QtObject {
         property var setNames: ["Documents", "Photos"]
         property var setIds: ["documents-id", "photos-id"]
@@ -24,7 +57,7 @@ QtObject {
         property var runningSetIds: []
         property var recentBackups: ["Photos\nNo backup run yet", "Documents\nsucceeded"]
         property var recentBackupSetIds: ["photos-id", "documents-id"]
-        property var recentBackupTimestamps: ["", "2026-10-01 10:00"]
+        property var recentBackupTimestamps: ["", "01/10/2026 10:00:00"]
         property var previewIncluded: []
         property var previewExcluded: []
         property var previewSkipped: []
@@ -33,6 +66,10 @@ QtObject {
         property bool cleanupConfirmationRequired: false
         property int removedIndex: -1
         property int addedCount: 0
+        property int refreshCount: 0
+        property string importedPath: ""
+        property string exportedPath: ""
+        property bool importSucceeds: true
         signal currentSetChanged()
         signal statusChanged(string status)
         signal failed(string error)
@@ -46,8 +83,14 @@ QtObject {
             currentIndex = setNames.length - 1
         }
         function preview() {}
+        function recentBackupFolderPath(setId) {
+            return setIds.indexOf(setId) >= 0 ? "/backups/" + setId : ""
+        }
         function save() { return true }
+        function importSets(path) { importedPath = path; return importSucceeds }
+        function exportSets(path) { exportedPath = path; return true }
         function confirmCleanup() { return true }
+        function refreshRunState() { refreshCount++ }
     }
 
     property QtObject backupLauncher: QtObject {
@@ -55,6 +98,34 @@ QtObject {
         signal started()
         signal failed(string error)
         function startBackup(id) { launchedId = id }
+    }
+
+    property QtObject protonFolderBrowser: QtObject {
+        property bool busy: false
+        property string requestedPath: ""
+        signal folderResolved(url folderUrl)
+        signal failed(string error)
+        function openFolder(path) { requestedPath = path }
+    }
+
+    property QtObject recentBackupCopies: QtObject {
+        property bool busy: false
+        property string openedId: ""
+        property string deleteRequestedId: ""
+        property bool deleteConfirmed: false
+        property bool deleteCancelled: false
+        signal folderResolved(string path)
+        signal deleteConfirmationReady(string name, string path)
+        signal copyDeleted(string setId)
+        signal statusChanged(string message)
+        signal failed(string error)
+        function openCopy(setId) { openedId = setId }
+        function requestDelete(setId) {
+            deleteRequestedId = setId
+            deleteConfirmationReady("Documents", "/backups/documents-id/copy-id")
+        }
+        function confirmDelete() { deleteConfirmed = true }
+        function cancelDelete() { deleteCancelled = true }
     }
 
     property QtObject restoreController: QtObject {

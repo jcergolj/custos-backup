@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QFile>
 #include <QPalette>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -34,13 +35,25 @@ public slots:
 
     void qmlEngineAvailable(QQmlEngine *engine)
     {
+        const QString importPath = home.filePath(QStringLiteral("imported sets.json"));
+        const QString invalidPath = home.filePath(QStringLiteral("invalid sets.json"));
+        for (const QString &path : {importPath, invalidPath}) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly)) {
+                qFatal("Cannot create import-dialog test fixture.");
+            }
+            file.write(path == importPath ? R"({"application":"custos","version":1,"sets":[]})" : "{");
+        }
+        engine->rootContext()->setContextProperty(QStringLiteral("dashboardImportFileUrl"), QUrl::fromLocalFile(importPath));
+        engine->rootContext()->setContextProperty(QStringLiteral("dashboardImportFilePath"), importPath);
+        engine->rootContext()->setContextProperty(QStringLiteral("dashboardInvalidImportFileUrl"), QUrl::fromLocalFile(invalidPath));
         QQmlComponent component(engine, QUrl::fromLocalFile(QStringLiteral(QUICK_TEST_SOURCE_DIR "/DashboardControllers.qml")));
         QObject *controllers = component.create();
         if (!controllers) {
             qFatal("Cannot load dashboard controller doubles: %s", qPrintable(component.errorString()));
         }
         controllers->setParent(engine);
-        for (const char *name : {"backupSetController", "backupLauncher", "restoreController"}) {
+        for (const char *name : {"backupSetController", "backupLauncher", "restoreController", "protonFolderBrowser", "recentBackupCopies", "protonAuth", "themeColors", "resourceUsage"}) {
             engine->rootContext()->setContextProperty(QString::fromLatin1(name), controllers->property(name).value<QObject *>());
         }
         engine->rootContext()->setContextProperty(QStringLiteral("dashboardScreenshotPath"), qEnvironmentVariable("CUSTOS_TEST_SCREENSHOT"));
