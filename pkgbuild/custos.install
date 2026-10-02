@@ -1,8 +1,8 @@
 post_install() {
     update-desktop-database -q >/dev/null 2>&1 || true
     gtk-update-icon-cache -q -t -f usr/share/icons/hicolor >/dev/null 2>&1 || true
-    printf '%s\n' 'Custos Backup installed. Authenticate proton-drive, configure a backup, then run:'
-    printf '%s\n' '  systemctl --user enable --now custos.timer'
+    printf '%s\n' 'Custos Backup installed. Open Custos, sign in to Proton Drive, and save a backup.'
+    printf '%s\n' 'Saving a daily, weekly, or monthly schedule enables scheduling automatically.'
 }
 
 post_upgrade() {

@@ -13,8 +13,10 @@
 #include "protonauthcontroller.h"
 #include "themecolors.h"
 #include "resourceusage.h"
+#include "backupscheduler.h"
 #include <QDir>
 #include <QSysInfo>
+#include <QTimer>
 
 int main(int argc, char *argv[])
 {
@@ -44,6 +46,26 @@ int main(int argc, char *argv[])
     ProtonAuthController protonAuth(protonBinary);
     ThemeColors themeColors;
     ResourceUsage resourceUsage;
+    BackupScheduler backupScheduler(configPath);
+    bool schedulingUpdatePending = false;
+    const auto updateScheduling = [&] {
+        if (resourceUsage.busy()) {
+            schedulingUpdatePending = true;
+        } else {
+            schedulingUpdatePending = false;
+            backupScheduler.applySavedSchedules();
+        }
+    };
+    QObject::connect(&backupSetController, &BackupSetController::configurationSaved, &backupScheduler, [&] {
+        // The Save handler also applies resources. Let it finish writing/reloading
+        // them before starting a timer that may immediately launch overdue work.
+        QTimer::singleShot(0, &backupScheduler, updateScheduling);
+    });
+    QObject::connect(&resourceUsage, &ResourceUsage::busyChanged, &backupScheduler, [&] {
+        if (!resourceUsage.busy() && schedulingUpdatePending) {
+            updateScheduling();
+        }
+    });
 
     engine.rootContext()->setContextProperty(QStringLiteral("backupEngine"), &backupEngine);
     engine.rootContext()->setContextProperty(QStringLiteral("backupLauncher"), &backupLauncher);
@@ -54,6 +76,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("protonAuth"), &protonAuth);
     engine.rootContext()->setContextProperty(QStringLiteral("themeColors"), &themeColors);
     engine.rootContext()->setContextProperty(QStringLiteral("resourceUsage"), &resourceUsage);
+    engine.rootContext()->setContextProperty(QStringLiteral("backupScheduler"), &backupScheduler);
     engine.loadFromModule(QStringLiteral("Custos"), QStringLiteral("Main"));
 
     if (engine.rootObjects().isEmpty()) {

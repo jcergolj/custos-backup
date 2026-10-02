@@ -31,6 +31,7 @@ qt_add_executable(custos
     src/protonauthcontroller.cpp
     src/themecolors.cpp
     src/resourceusage.cpp
+    src/backupscheduler.cpp
     src/backupjob.cpp
     src/backupworker.cpp
     src/backuplauncher.cpp
@@ -76,6 +77,11 @@ target_link_libraries(custos PRIVATE
 )
 
 enable_testing()
+
+qt_add_executable(backupscheduler-test tests/backupscheduler_test.cpp
+    src/backupscheduler.cpp src/backupconfig.cpp)
+target_link_libraries(backupscheduler-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME backupscheduler-test COMMAND backupscheduler-test)
 
 qt_add_executable(resourceusage-test tests/resourceusage_test.cpp src/resourceusage.cpp)
 target_link_libraries(resourceusage-test PRIVATE Qt6::Core Qt6::Test)

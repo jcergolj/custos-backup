@@ -105,6 +105,7 @@ signals:
     void runStateChanged();
     void dashboardChanged();
     void cleanupChanged();
+    void configurationSaved();
     void statusChanged(const QString &status);
     void failed(const QString &error);
 

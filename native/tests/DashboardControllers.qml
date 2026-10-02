@@ -1,6 +1,20 @@
 import QtQuick
 
 QtObject {
+    property QtObject backupScheduler: QtObject {
+        property bool busy: false
+        property bool ready: true
+        property bool hasSchedules: true
+        property string status: "Scheduling active"
+        property string error: ""
+        property int enableCount: 0
+        property int refreshCount: 0
+        signal messageChanged(string message)
+        signal failed(string error)
+        function enable() { enableCount++ }
+        function refresh() { refreshCount++ }
+    }
+
     property QtObject resourceUsage: QtObject {
         property var names: ["Very low", "Low", "Medium", "High", "Very high"]
         property var descriptions: ["CPU limit: 10%", "CPU limit: 25%", "CPU limit: 50%", "CPU limit: 100%", "CPU limit: 200%"]

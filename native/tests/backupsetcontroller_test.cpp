@@ -26,7 +26,28 @@ private slots:
     void emptyImportDoesNotRestoreLegacySources();
     void exportCannotOverwriteLocalState();
     void importIsBlockedWhileWorkerRuns();
+    void successfulSaveNotifiesSchedulingButPreviewAndFailedSaveDoNot();
 };
+
+void BackupSetControllerTest::successfulSaveNotifiesSchedulingButPreviewAndFailedSaveDoNot()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    BackupEngine engine;
+    BackupSetController controller(engine, directory.filePath("settings.json"));
+    QSignalSpy saved(&controller, &BackupSetController::configurationSaved);
+    controller.addSet();
+    controller.setCurrentScheduleFrequency("daily");
+    controller.preview();
+    QVERIFY(saved.isEmpty());
+    QVERIFY(!controller.save());
+    QVERIFY(saved.isEmpty());
+    controller.setCurrentSources({"/safe/documents"});
+    QVERIFY(controller.save());
+    QCOMPARE(saved.count(), 1);
+    controller.removeCurrentSet();
+    QCOMPARE(saved.count(), 2);
+}
 
 void BackupSetControllerTest::previewUpdatesFilesWithoutCountMessage_data()
 {

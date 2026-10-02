@@ -138,8 +138,21 @@ to the worker and its CLI subprocesses from the next worker start. A running
 backup is not restarted. Quotas are measured against one CPU core, so 200%
 permits up to two cores. Priorities never exceed normal (`nice=0`).
 
-The timer is intentionally not enabled by the package install hook because the
-CLI must be authenticated and a backup must exist first.
+The package installs the timer without enabling it. After a successful backup
+configuration save or import with any enabled schedule, the UI asynchronously
+runs `systemctl --user daemon-reload`, then
+`systemctl --user enable --now custos.timer`. Activation waits for any
+resource-preset update to finish, so an immediately due backup starts with the
+saved limits. Invalid or failed saves,
+preview, and manual-only configurations do not enable the timer.
+
+The scheduler checks the timer's `LoadState`, `ActiveState`, and `UnitFileState`
+at startup, after activation, on window focus, and every 30 seconds. It reports
+active, paused, session-only, and unavailable states in the UI. Activation errors
+leave the saved schedules intact and provide an in-app retry. Opening the app
+does not automatically resume an externally paused timer. Disabling a backup's
+schedule stops future scheduled runs for that set; the shared timer may remain
+active to process queued work and retries.
 
 The display name is **Custos Backup**. The technical package, executable, unit,
 and configuration names are `custos-git`, `custos`, and `custos.*`.

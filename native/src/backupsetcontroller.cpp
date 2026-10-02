@@ -427,6 +427,7 @@ void BackupSetController::removeSet(int index)
     emit dashboardChanged();
     clearPreview();
     emit statusChanged(QStringLiteral("Backup set removed."));
+    emit configurationSaved();
 }
 
 void BackupSetController::preview()
@@ -462,6 +463,7 @@ bool BackupSetController::save()
     }
 
     emit statusChanged(QStringLiteral("Backup saved."));
+    emit configurationSaved();
     return true;
 }
 
@@ -516,6 +518,7 @@ bool BackupSetController::importSets(const QString &filePath)
     emit currentSetChanged();
     emit dashboardChanged();
     emit statusChanged(QStringLiteral("Backup sets imported."));
+    emit configurationSaved();
     return true;
 }
 

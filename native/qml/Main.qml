@@ -382,6 +382,52 @@ ApplicationWindow {
             }
         }
 
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: root.contentPadding
+            Layout.rightMargin: root.contentPadding
+            Layout.bottomMargin: 12
+            spacing: 12
+
+            Label {
+                objectName: "schedulingStatusLabel"
+                text: backupScheduler.status
+                color: backupScheduler.ready ? root.inkColor : root.mutedColor
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Button {
+                objectName: "enableSchedulingButton"
+                text: qsTr("Enable scheduling")
+                visible: backupScheduler.hasSchedules && !backupScheduler.ready
+                enabled: !backupScheduler.busy && !resourceUsage.busy
+                onClicked: backupScheduler.enable()
+            }
+
+            Button {
+                objectName: "checkSchedulingButton"
+                text: qsTr("↻")
+                enabled: !backupScheduler.busy
+                Accessible.name: qsTr("Check scheduling status")
+                ToolTip.visible: hovered
+                ToolTip.text: Accessible.name
+                onClicked: backupScheduler.refresh()
+            }
+        }
+
+        Label {
+            objectName: "schedulingErrorLabel"
+            text: backupScheduler.error
+            visible: text.length > 0
+            color: root.inkColor
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Layout.leftMargin: root.contentPadding
+            Layout.rightMargin: root.contentPadding
+            Layout.bottomMargin: 12
+        }
+
         StackLayout {
             currentIndex: root.showEditor ? 1 : 0
             Layout.fillWidth: true
@@ -1026,6 +1072,7 @@ ApplicationWindow {
 
                 ComboBox {
                     id: scheduleFrequency
+                    objectName: "scheduleFrequency"
                     model: ["disabled", "daily", "weekly", "monthly"]
                     width: 130
                 }
@@ -1284,7 +1331,14 @@ ApplicationWindow {
     onActiveChanged: {
         if (active) {
             protonAuth.refresh()
+            backupScheduler.refresh()
         }
+    }
+
+    Connections {
+        target: backupScheduler
+        function onMessageChanged(message) { root.setStatus(message) }
+        function onFailed(error) { root.setStatus(error) }
     }
 
     Connections {

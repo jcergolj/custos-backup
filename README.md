@@ -87,19 +87,22 @@ backup worker and its CLI processes, not the desktop interface.
 Schedules can be daily, weekly, or monthly. If a monthly day does not exist in
 the current month, the last day of that month is used.
 
-### 4. Enable scheduling
+### 4. Check scheduling
 
-Scheduling is not enabled during installation. First save at least one backup
-set and confirm that Proton Drive authentication works:
+Choose a **daily**, **weekly**, or **monthly** schedule and press **Save**.
+Custos automatically enables and starts its scheduler; no terminal setup is
+needed. Importing backup sets with enabled schedules also activates scheduling.
+Manual-only backup sets do not activate it.
 
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now custos.timer
-systemctl --user status custos.timer
-```
+The status below the app title shows **Scheduling active** once the timer is
+enabled and running. If activation fails, your backup settings remain saved and
+the error stays visible. Press **Enable scheduling** to retry, or **↻** to check
+the current status.
 
-The timer runs as your user after login and catches up missed work. It does not
-require user lingering.
+The timer runs as your user while logged in and catches up overdue backups after
+your next login. It does not run while the computer is off or require user
+lingering for this login-session behavior. Make sure Proton Drive is signed in
+before expecting scheduled backups to succeed.
 
 ## Desktop theme
 
@@ -162,6 +165,10 @@ a standalone remote-root discovery action for a fresh installation.
 ```bash
 systemctl --user disable --now custos.timer
 ```
+
+Custos shows **Scheduling paused**. Use **Enable scheduling** to resume. Saving
+backup settings while an enabled schedule exists also reactivates the timer.
+To make a backup manual-only, choose **disabled** for its schedule and save.
 
 ## Troubleshooting
 

@@ -13,6 +13,13 @@ TestCase {
     Component { id: windowComponent; Custos.Main {} }
 
     function init() {
+        backupScheduler.busy = false
+        backupScheduler.ready = true
+        backupScheduler.hasSchedules = true
+        backupScheduler.status = "Scheduling active"
+        backupScheduler.error = ""
+        backupScheduler.enableCount = 0
+        backupScheduler.refreshCount = 0
         resourceUsage.presetIndex = 0
         resourceUsage.busy = false
         resourceUsage.savedIndex = -1
@@ -532,6 +539,33 @@ TestCase {
         protonAuth.authenticated = true
         tryCompare(signIn, "visible", false)
         compare(control("protonAuthRetryButton").visible, false)
+    }
+
+    function test_schedulingStatusAndActivationErrorsStayVisible() {
+        compare(control("schedulingStatusLabel").text, "Scheduling active")
+        compare(control("enableSchedulingButton").visible, false)
+        backupScheduler.ready = false
+        backupScheduler.status = "Scheduling paused"
+        tryCompare(control("enableSchedulingButton"), "visible", true)
+        waitForRendering(app.contentItem)
+        mouseClick(control("enableSchedulingButton"))
+        compare(backupScheduler.enableCount, 1)
+        backupScheduler.busy = true
+        compare(control("enableSchedulingButton").enabled, false)
+        compare(control("checkSchedulingButton").enabled, false)
+        backupScheduler.busy = false
+        backupScheduler.error = "Unit custos.timer is masked"
+        backupScheduler.status = "Scheduling needs attention"
+        const error = control("schedulingErrorLabel")
+        compare(error.visible, true)
+        compare(error.text, "Unit custos.timer is masked")
+        backupScheduler.failed("Could not activate scheduling")
+        compare(control("notificationMessageLabel").text, "Could not activate scheduling")
+        const refreshCount = backupScheduler.refreshCount
+        mouseClick(control("checkSchedulingButton"))
+        compare(backupScheduler.refreshCount, refreshCount + 1)
+        backupScheduler.hasSchedules = false
+        compare(control("enableSchedulingButton").visible, false)
     }
 
     function test_resourceUsageOffersFiveGlobalPresetsAndSavesSelection() {
