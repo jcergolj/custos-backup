@@ -124,11 +124,27 @@ bool BackupRunStore::load(QString *error)
         record.progress.totalFiles = qMax(0, progress.value(QStringLiteral("total_files")).toInt());
         record.progress.processedFiles = qMax(0, progress.value(QStringLiteral("processed_files")).toInt());
         record.progress.finalizing = progress.value(QStringLiteral("finalizing")).toBool();
+        record.progress.verifiedFiles = qMax(0, progress.value(QStringLiteral("verified_files")).toInt());
+        record.progress.verifiedBytes = qMax(qint64(0), progress.value(QStringLiteral("verified_bytes")).toInteger());
+        record.progress.failedItems = qMax(0, progress.value(QStringLiteral("failed_items")).toInt());
+        record.progress.currentFile = progress.value(QStringLiteral("current_file")).toString();
+        record.progress.currentFileBytes = qMax(qint64(0), progress.value(QStringLiteral("current_file_bytes")).toInteger());
+        record.progress.phase = progress.value(QStringLiteral("phase")).toString();
         record.progressElapsedMs = qMax(qint64(0), progress.value(QStringLiteral("elapsed_ms")).toInteger());
         record.progressUpdatedAt = readDate(progress, QStringLiteral("updated_at"));
         record.lastSuccessfulElapsedMs = qMax(qint64(0), object.value(QStringLiteral("last_successful_elapsed_ms")).toInteger());
         record.lastSuccessfulBytes = qMax(qint64(0), object.value(QStringLiteral("last_successful_bytes")).toInteger());
         record.lastSuccessfulFiles = qMax(0, object.value(QStringLiteral("last_successful_files")).toInt());
+        const QJsonObject result = object.value(QStringLiteral("result")).toObject();
+        record.result.reported = result.value(QStringLiteral("reported")).toBool();
+        record.result.manifestVerified = result.value(QStringLiteral("manifest_verified")).toBool();
+        record.result.verifiedFiles = qMax(0, result.value(QStringLiteral("verified_files")).toInt());
+        record.result.verifiedBytes = qMax(qint64(0), result.value(QStringLiteral("verified_bytes")).toInteger());
+        for (const QJsonValue &value : result.value(QStringLiteral("issues")).toArray()) {
+            const QJsonObject issue = value.toObject();
+            record.result.issues.append({issue.value(QStringLiteral("path")).toString(),
+                issue.value(QStringLiteral("phase")).toString(), issue.value(QStringLiteral("reason")).toString()});
+        }
         if (record.setId.isEmpty()) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup run state contains an invalid record.");
@@ -175,10 +191,28 @@ bool BackupRunStore::save(QString *error) const
             {QStringLiteral("total_files"), record.progress.totalFiles},
             {QStringLiteral("processed_files"), record.progress.processedFiles},
             {QStringLiteral("finalizing"), record.progress.finalizing},
+            {QStringLiteral("verified_files"), record.progress.verifiedFiles},
+            {QStringLiteral("verified_bytes"), record.progress.verifiedBytes},
+            {QStringLiteral("failed_items"), record.progress.failedItems},
+            {QStringLiteral("current_file"), record.progress.currentFile},
+            {QStringLiteral("current_file_bytes"), record.progress.currentFileBytes},
+            {QStringLiteral("phase"), record.progress.phase},
             {QStringLiteral("elapsed_ms"), record.progressElapsedMs},
         };
         writeDate(progress, QStringLiteral("updated_at"), record.progressUpdatedAt);
         object.insert(QStringLiteral("progress"), progress);
+        QJsonArray issues;
+        for (const BackupIssue &issue : record.result.issues) {
+            issues.append(QJsonObject {{QStringLiteral("path"), issue.path},
+                {QStringLiteral("phase"), issue.phase}, {QStringLiteral("reason"), issue.reason}});
+        }
+        object.insert(QStringLiteral("result"), QJsonObject {
+            {QStringLiteral("reported"), record.result.reported},
+            {QStringLiteral("manifest_verified"), record.result.manifestVerified},
+            {QStringLiteral("verified_files"), record.result.verifiedFiles},
+            {QStringLiteral("verified_bytes"), record.result.verifiedBytes},
+            {QStringLiteral("issues"), issues},
+        });
         records.append(object);
     }
 
@@ -232,6 +266,7 @@ bool BackupRunStore::enqueue(const QString &setId, const QString &reason, const 
 
     record->status = QStringLiteral("pending");
     record->progress = {};
+    record->result = {};
     record->progressElapsedMs = 0;
     record->progressUpdatedAt = {};
     record->reason = reason;
@@ -247,7 +282,8 @@ QVector<int> BackupRunStore::readyIndexes(const QDateTime &now) const
     for (int index = 0; index < runRecords.size(); ++index) {
         const BackupRunRecord &record = runRecords.at(index);
         if ((record.status == QStringLiteral("pending") || record.status == QStringLiteral("retrying")
-             || record.status == QStringLiteral("waiting") || record.status == QStringLiteral("incomplete"))
+              || record.status == QStringLiteral("waiting") || record.status == QStringLiteral("incomplete")
+              || record.status == QStringLiteral("failed"))
             && (!record.nextAttempt.isValid() || record.nextAttempt <= now)) {
             indexes.append(index);
         }
@@ -296,6 +332,7 @@ void BackupRunStore::markRunning(BackupRunRecord &record)
 {
     record.status = QStringLiteral("running");
     record.progress = {};
+    record.result = {};
     record.progressElapsedMs = 0;
     record.progressUpdatedAt = {};
     record.attempts++;
@@ -334,6 +371,14 @@ void BackupRunStore::markRetrying(BackupRunRecord &record, const QString &error,
 void BackupRunStore::markIncomplete(BackupRunRecord &record, const QString &error, const QDateTime &now)
 {
     record.status = QStringLiteral("incomplete");
+    record.lastError = error;
+    record.lastFailure = now;
+    record.nextAttempt = now.addSecs(retryDelaySeconds(record.attempts));
+}
+
+void BackupRunStore::markFailed(BackupRunRecord &record, const QString &error, const QDateTime &now)
+{
+    record.status = QStringLiteral("failed");
     record.lastError = error;
     record.lastFailure = now;
     record.nextAttempt = now.addSecs(retryDelaySeconds(record.attempts));

@@ -2,6 +2,7 @@
 
 #include "backupprovider.h"
 #include "backupprogress.h"
+#include "backupresult.h"
 
 #include <QObject>
 #include <QDateTime>
@@ -47,7 +48,7 @@ public:
     Q_INVOKABLE QString previewError(const QString &sourceDirectory) const;
     bool backup(const QString &sourceDirectory, const QString &remoteRoot, BackupProvider &provider, QString *manifestPath, QString *error = nullptr) const;
     bool backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, BackupProvider &provider, QString *manifestPath, QString *error = nullptr) const;
-    bool backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error = nullptr, const std::function<void(const BackupProgress &)> &reportProgress = {}) const;
+    bool backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error = nullptr, const std::function<void(const BackupProgress &)> &reportProgress = {}, BackupResult *result = nullptr) const;
     bool restoreFile(const BackupEntry &entry, const QString &destinationDirectory, BackupProvider &provider, QString *error = nullptr) const;
 
     BackupPreview preview(const QStringList &sourceDirectories, const QStringList &exclusions) const;

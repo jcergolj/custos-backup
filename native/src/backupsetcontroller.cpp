@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QLockFile>
 #include <QSysInfo>
+#include <QLocale>
 #include <QUuid>
 
 #include <algorithm>
@@ -13,6 +14,36 @@ namespace {
 bool isRunActive(const QString &status)
 {
     return status == QStringLiteral("running");
+}
+
+QString statusLabel(const QString &status)
+{
+    if (status == QStringLiteral("success")) return QObject::tr("Successful");
+    if (status == QStringLiteral("incomplete")) return QObject::tr("Incomplete");
+    if (status == QStringLiteral("failed")) return QObject::tr("Failed");
+    if (status == QStringLiteral("running")) return QObject::tr("Running");
+    if (status == QStringLiteral("pending")) return QObject::tr("Queued");
+    if (status == QStringLiteral("retrying")) return QObject::tr("Retrying");
+    if (status == QStringLiteral("waiting")) return QObject::tr("Waiting");
+    if (status == QStringLiteral("authentication_required")) return QObject::tr("Sign-in required");
+    return status;
+}
+
+QString phaseLabel(const QString &phase)
+{
+    if (phase == QStringLiteral("reading")) return QObject::tr("Reading");
+    if (phase == QStringLiteral("checking")) return QObject::tr("Checking remote file");
+    if (phase == QStringLiteral("uploading")) return QObject::tr("Uploading");
+    if (phase == QStringLiteral("verifying")) return QObject::tr("Verifying");
+    if (phase == QStringLiteral("selection")) return QObject::tr("Selecting sources");
+    if (phase == QStringLiteral("finalizing")) return QObject::tr("Finalizing backup");
+    return QObject::tr("Preparing backup");
+}
+
+QString resultSummary(const BackupResult &result)
+{
+    return QObject::tr("%1 files backed up · %2 items failed")
+        .arg(result.verifiedFiles).arg(result.issues.size());
 }
 
 BackupSet newSet(int number)
@@ -330,14 +361,74 @@ QStringList BackupSetController::recentBackups() const
             continue;
         }
 
-        QString detail = record->status;
-        if (!record->lastError.isEmpty()) {
+        QString detail = statusLabel(record->status);
+        if (!record->result.manifestVerified && !record->lastError.isEmpty()) {
             detail += QStringLiteral(" | %1").arg(record->lastError);
         }
         summaries.append(QStringLiteral("%1\n%2").arg(set.name, detail));
     }
 
     return summaries;
+}
+
+QVariantMap BackupSetController::transferProgress() const
+{
+    QVariantMap result;
+    for (const BackupSet &set : config.sets) {
+        const BackupRunRecord *record = runStore.find(set.id);
+        if (record == nullptr || !isRunActive(record->status)) {
+            continue;
+        }
+        const BackupProgress &progress = record->progress;
+        QString text = progress.totalFiles > 0
+            ? tr("%1 of %2 files processed · %3 verified · %4 items failed")
+                .arg(progress.processedFiles).arg(progress.totalFiles).arg(progress.verifiedFiles).arg(progress.failedItems)
+            : tr("Preparing backup…");
+        if (!progress.currentFile.isEmpty()) {
+            text += QStringLiteral("\n") + tr("%1: %2 (%3)").arg(phaseLabel(progress.phase),
+                progress.currentFile, QLocale().formattedDataSize(progress.currentFileBytes));
+        }
+        result.insert(set.id, QVariantMap {
+            {QStringLiteral("text"), text},
+            {QStringLiteral("fraction"), progress.totalFiles > 0
+                ? qBound(0.0, double(progress.processedFiles) / progress.totalFiles, 1.0) : 0.0},
+            {QStringLiteral("indeterminate"), progress.totalFiles <= 0 || progress.finalizing},
+        });
+    }
+    return result;
+}
+
+QVariantMap BackupSetController::backupDetails(const QString &setId) const
+{
+    const BackupRunRecord *record = runStore.find(setId);
+    if (record == nullptr) {
+        return {};
+    }
+    QVariantList issues;
+    for (const BackupIssue &issue : record->result.issues) {
+        issues.append(QVariantMap {{QStringLiteral("path"), issue.path},
+            {QStringLiteral("phase"), phaseLabel(issue.phase)}, {QStringLiteral("reason"), issue.reason}});
+    }
+    // A payload verification alone is insufficient to claim a restorable copy.
+    const bool verified = record->result.manifestVerified;
+    return {
+        {QStringLiteral("status"), statusLabel(record->status)},
+        {QStringLiteral("summary"), record->result.reported && verified ? resultSummary(record->result) : QString()},
+        {QStringLiteral("error"), record->lastError},
+        {QStringLiteral("copyPath"), record->remoteCopyPath},
+        {QStringLiteral("issues"), issues},
+        {QStringLiteral("nextAttempt"), record->nextAttempt.isValid()
+            ? record->nextAttempt.toLocalTime().toString(QStringLiteral("dd/MM/yyyy HH:mm:ss")) : QString()},
+    };
+}
+
+QVariantMap BackupSetController::runDetails() const
+{
+    QVariantMap details;
+    for (const BackupSet &set : config.sets) {
+        details.insert(set.id, backupDetails(set.id));
+    }
+    return details;
 }
 
 QStringList BackupSetController::recentBackupSetIds() const

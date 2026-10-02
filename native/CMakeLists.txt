@@ -218,6 +218,8 @@ qt_add_executable(reliability-test
 )
 
 target_link_libraries(reliability-test PRIVATE Qt6::Core Qt6::Test)
+target_compile_definitions(reliability-test PRIVATE OMACUSTOS_WORKER_BINARY="$<TARGET_FILE:omacustos-worker>")
+add_dependencies(reliability-test omacustos-worker)
 add_test(NAME reliability-test COMMAND reliability-test)
 
 qt_add_executable(workerrecovery-test

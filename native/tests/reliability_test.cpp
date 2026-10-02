@@ -1,6 +1,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QFile>
+#include <QProcess>
+#include <QProcessEnvironment>
 
 #include "../src/backupprerequisites.h"
 #include "../src/backuprunstore.h"
@@ -26,6 +28,8 @@ private slots:
     void progressPersistsAndResetsForANewAttempt();
     void olderRunRecordsHaveNoMadeUpEstimate();
     void previousSuccessProvidesAnInitialSingleFileEstimate();
+    void workerPersistsDistinctResultsAndFailureDetails_data();
+    void workerPersistsDistinctResultsAndFailureDetails();
 };
 
 void ReliabilityTest::previousSuccessProvidesAnInitialSingleFileEstimate()
@@ -93,6 +97,13 @@ void ReliabilityTest::progressPersistsAndResetsForANewAttempt()
     record.progress = {1000, 200, 10, 2, false};
     record.progressElapsedMs = 20000;
     record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
+    record.progress.verifiedFiles = 1;
+    record.progress.verifiedBytes = 100;
+    record.progress.failedItems = 1;
+    record.progress.phase = "uploading";
+    record.progress.currentFile = "/safe/large file";
+    record.progress.currentFileBytes = 500;
+    record.result = {true, true, 1, 100, {{"/safe/bad", "reading", "Permission denied"}}};
     QVERIFY(store.save());
     BackupRunStore reopened(home.filePath("runs.json"));
     QVERIFY(reopened.load());
@@ -102,11 +113,114 @@ void ReliabilityTest::progressPersistsAndResetsForANewAttempt()
     QCOMPARE(restored.progress.totalFiles, 10);
     QCOMPARE(restored.progress.processedFiles, 2);
     QCOMPARE(restored.progressUpdatedAt, record.progressUpdatedAt);
+    QCOMPARE(restored.progress.currentFile, record.progress.currentFile);
+    QCOMPARE(restored.progress.phase, record.progress.phase);
+    QCOMPARE(restored.progress.currentFileBytes, qint64(500));
+    QCOMPARE(restored.progress.verifiedFiles, 1);
+    QCOMPARE(restored.progress.verifiedBytes, qint64(100));
+    QCOMPARE(restored.progress.failedItems, 1);
+    QVERIFY(restored.result.manifestVerified);
+    QCOMPARE(restored.result.issues.first().reason, QString("Permission denied"));
     QCOMPARE(restored.estimatedRemainingSeconds(record.progressUpdatedAt), qint64(80));
     reopened.markRunning(restored);
     QCOMPARE(restored.progress.totalFiles, 0);
+    QVERIFY(!restored.result.reported);
+    QVERIFY(restored.result.issues.isEmpty());
     QCOMPARE(restored.progressElapsedMs, qint64(0));
     QVERIFY(!restored.progressUpdatedAt.isValid());
+}
+
+void ReliabilityTest::workerPersistsDistinctResultsAndFailureDetails_data()
+{
+    QTest::addColumn<QString>("failure");
+    QTest::addColumn<QString>("status");
+    QTest::addColumn<int>("verified");
+    QTest::newRow("successful") << QString("none") << QString("success") << 2;
+    QTest::newRow("partial upload") << QString("partial") << QString("incomplete") << 1;
+    QTest::newRow("all uploads failed") << QString("all") << QString("failed") << 0;
+    QTest::newRow("manifest upload failed") << QString("manifest") << QString("failed") << 2;
+}
+
+void ReliabilityTest::workerPersistsDistinctResultsAndFailureDetails()
+{
+    QFETCH(QString, failure);
+    QFETCH(QString, status);
+    QFETCH(int, verified);
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    QFile cli(home.filePath("fake-proton"));
+    QVERIFY(cli.open(QIODevice::WriteOnly));
+    cli.write(R"CLI(#!/bin/bash
+set -eu
+case "$2" in
+  list) printf '[]' ;;
+  upload)
+    source="${@: -2:1}"
+    parent="${@: -1}"
+    name="$(basename "$source")"
+    if [[ "$FAILURE" == all && "$name" != manifest.json ]] ||
+       [[ "$FAILURE" == partial && "$name" == bad.txt ]] ||
+       [[ "$FAILURE" == manifest && "$name" == manifest.json ]]; then
+      printf 'Connection interrupted' >&2
+      exit 1
+    fi
+    mkdir -p "$FAKE_REMOTE$parent"
+    cp "$source" "$FAKE_REMOTE$parent/$name"
+    ;;
+  info)
+    path="$FAKE_REMOTE${@: -1}"
+    [[ -f "$path" ]] || exit 1
+    printf '{"size":%s}' "$(stat -c %s "$path")"
+    ;;
+  *) exit 1 ;;
+esac
+)CLI");
+    cli.close();
+    QVERIFY(cli.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    QStringList sources;
+    for (const QString &name : {QString("good.txt"), QString("bad.txt")}) {
+        QFile file(home.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("content");
+        sources.append(file.fileName());
+    }
+    BackupConfig config;
+    config.protonBinary = cli.fileName();
+    config.sets = {{"documents", "Documents", "/my-files/backups", sources, {}}};
+    const QString configPath = home.filePath("settings.json");
+    QVERIFY(BackupConfigStore(configPath).save(config));
+    BackupRunStore store(home.filePath("omacustos-backup-runs.json"));
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QVERIFY(store.enqueue("documents", "manual", now));
+    QVERIFY(store.save());
+    QProcess worker;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("FAKE_REMOTE", home.filePath("remote"));
+    environment.insert("FAILURE", failure);
+    worker.setProcessEnvironment(environment);
+    worker.start(QStringLiteral(OMACUSTOS_WORKER_BINARY), {"--config", configPath});
+    QVERIFY(worker.waitForFinished(10000));
+    QCOMPARE(worker.exitStatus(), QProcess::NormalExit);
+    QVERIFY2(worker.exitCode() == 0, worker.readAllStandardError().constData());
+    QVERIFY(store.load());
+    const auto &record = *store.find("documents");
+    QCOMPARE(record.status, status);
+    QCOMPARE(record.result.verifiedFiles, verified);
+    QCOMPARE(record.result.manifestVerified, failure != "manifest");
+    if (status == "success") {
+        QVERIFY(record.lastSuccess.isValid());
+        QVERIFY(!record.nextAttempt.isValid());
+    } else {
+        QVERIFY(record.lastFailure.isValid());
+        QVERIFY(record.nextAttempt.isValid());
+        QCOMPARE(store.readyIndexes(record.nextAttempt).size(), 1);
+    }
+    if (failure == "partial" || failure == "all") {
+        QCOMPARE(record.result.issues.size(), failure == "all" ? 2 : 1);
+        QCOMPARE(record.result.issues.first().path, home.filePath("bad.txt"));
+        QCOMPARE(record.result.issues.first().phase, QString("uploading"));
+        QCOMPARE(record.result.issues.first().reason, QString("Connection interrupted"));
+    }
 }
 
 void ReliabilityTest::olderRunRecordsHaveNoMadeUpEstimate()

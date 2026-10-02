@@ -4,6 +4,7 @@
 #include <QString>
 #include <QVector>
 #include "backupprogress.h"
+#include "backupresult.h"
 
 struct BackupRunRecord {
     QString setId;
@@ -24,6 +25,7 @@ struct BackupRunRecord {
     qint64 lastSuccessfulElapsedMs = 0;
     qint64 lastSuccessfulBytes = 0;
     int lastSuccessfulFiles = 0;
+    BackupResult result;
 
     // -1 means insufficient progress; zero means the estimate has elapsed.
     qint64 estimatedRemainingSeconds(const QDateTime &now) const;
@@ -52,6 +54,7 @@ public:
     void markWaiting(BackupRunRecord &record, const QString &reason, const QDateTime &now);
     void markRetrying(BackupRunRecord &record, const QString &error, const QDateTime &now);
     void markIncomplete(BackupRunRecord &record, const QString &error, const QDateTime &now);
+    void markFailed(BackupRunRecord &record, const QString &error, const QDateTime &now);
     void markAuthenticationRequired(BackupRunRecord &record, const QString &error, const QDateTime &now);
 
     static int retryDelaySeconds(int attempt);

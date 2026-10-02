@@ -1,10 +1,42 @@
 #include <QTemporaryDir>
 #include <QCryptographicHash>
 #include <QTest>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "../src/backupengine.h"
 #include "../src/backupmanifest.h"
 #include "../src/localprovider.h"
+
+class FailingProvider final : public BackupProvider
+{
+public:
+    explicit FailingProvider(const QString &root) : local(root) {}
+    LocalProvider local;
+    bool failManifest = false;
+    bool failAll = false;
+    bool upload(const QString &source, const QString &remote, QString *error) override
+    {
+        if (remote.endsWith("bad-upload") || (failManifest && remote.endsWith("manifest.json"))
+            || (failAll && !remote.endsWith("manifest.json"))) {
+            if (error) *error = QStringLiteral("Connection interrupted");
+            return false;
+        }
+        return local.upload(source, remote, error);
+    }
+    bool inspect(const QString &path, RemoteFile *file, QString *error) override
+    {
+        if (!local.inspect(path, file, error)) return false;
+        if (path.endsWith("bad-verify")) ++file->size;
+        return true;
+    }
+    bool ensureDirectory(const QString &path, QString *error) override { return local.ensureDirectory(path, error); }
+    bool download(const QString &path, const QString &destination, QString *error) override { return local.download(path, destination, error); }
+    bool list(const QString &path, QVector<RemoteItem> *items, QString *error) override { return local.list(path, items, error); }
+    bool trash(const QString &path, QString *error) override { return local.trash(path, error); }
+    bool permanentlyDelete(const QString &path, QString *error) override { return local.permanentlyDelete(path, error); }
+};
 
 class BackupEngineTest final : public QObject
 {
@@ -27,6 +59,8 @@ private slots:
     void localProviderRejectsUnsafePaths();
     void reportsProgressForIncludedFilesAndFinalization_data();
     void reportsProgressForIncludedFilesAndFinalization();
+    void reportsFailuresAndKeepsOnlyVerifiedFilesRestorable_data();
+    void reportsFailuresAndKeepsOnlyVerifiedFilesRestorable();
 };
 
 void BackupEngineTest::reportsProgressForIncludedFilesAndFinalization_data()
@@ -53,6 +87,7 @@ void BackupEngineTest::reportsProgressForIncludedFilesAndFinalization()
     QVector<BackupProgress> updates;
     QString error;
     QString manifest;
+    BackupResult result;
     const bool success = engine.backup({source.path()}, "copy", {source.filePath("excluded")}, {},
         provider, &manifest, &error, [&](const BackupProgress &progress) {
             if (updates.isEmpty() && removeFile) {
@@ -62,21 +97,108 @@ void BackupEngineTest::reportsProgressForIncludedFilesAndFinalization()
                 QVERIFY(!QFile::exists(remote.filePath("copy/manifest.json")));
             }
             updates.append(progress);
-        });
+        }, &result);
     QCOMPARE(success, !removeFile);
-    QCOMPARE(updates.size(), 5);
     QCOMPARE(updates.first().totalFiles, 3);
     QCOMPARE(updates.first().totalBytes, qint64(30));
     QCOMPARE(updates.first().processedFiles, 0);
-    for (int index = 1; index <= 3; ++index) {
-        QCOMPARE(updates.at(index).processedFiles, index);
-        QCOMPARE(updates.at(index).processedBytes, qint64(index * 10));
-        QVERIFY(!updates.at(index).finalizing);
+    QVector<BackupProgress> finished;
+    bool sawUpload = false;
+    for (const BackupProgress &update : updates) {
+        if (update.currentFile.isEmpty() && update.processedFiles > 0 && !update.finalizing) {
+            finished.append(update);
+        }
+        if (update.phase == "uploading" && !update.currentFile.isEmpty()) {
+            sawUpload = true;
+            QCOMPARE(update.currentFileBytes, qint64(10));
+            QVERIFY(update.processedFiles < update.totalFiles);
+        }
+    }
+    QVERIFY(sawUpload);
+    QCOMPARE(finished.size(), 3);
+    for (int index = 0; index < 3; ++index) {
+        QCOMPARE(finished.at(index).processedFiles, index + 1);
+        QCOMPARE(finished.at(index).processedBytes, qint64((index + 1) * 10));
     }
     QVERIFY(updates.last().finalizing);
+    QCOMPARE(updates.last().verifiedFiles, removeFile ? 2 : 3);
+    QCOMPARE(updates.last().verifiedBytes, qint64(removeFile ? 20 : 30));
+    QCOMPARE(updates.last().failedItems, removeFile ? 1 : 0);
+    QVERIFY(result.manifestVerified);
+    if (removeFile) {
+        QCOMPARE(result.issues.first().path, source.filePath("one"));
+        QCOMPARE(result.issues.first().phase, QString("reading"));
+        QVERIFY(!result.issues.first().reason.isEmpty());
+    }
     QVector<BackupEntry> verified;
     QVERIFY(BackupManifest::load(manifest, &verified));
     QCOMPARE(verified.size(), removeFile ? 2 : 3);
+}
+
+void BackupEngineTest::reportsFailuresAndKeepsOnlyVerifiedFilesRestorable_data()
+{
+    QTest::addColumn<bool>("failManifest");
+    QTest::addColumn<bool>("failAll");
+    QTest::newRow("partial copy") << false << false;
+    QTest::newRow("manifest failed") << true << false;
+    QTest::newRow("all files failed") << false << true;
+}
+
+void BackupEngineTest::reportsFailuresAndKeepsOnlyVerifiedFilesRestorable()
+{
+    QFETCH(bool, failManifest);
+    QFETCH(bool, failAll);
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(source.isValid() && remote.isValid() && destination.isValid());
+    for (const QString &name : {QString("good"), QString("bad-upload"), QString("bad-verify")}) {
+        QFile file(source.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("important content");
+    }
+    BackupEngine engine;
+    FailingProvider provider(remote.path());
+    provider.failManifest = failManifest;
+    provider.failAll = failAll;
+    const BackupCopyMetadata metadata {"computer", "documents", "Documents", "copy", QDateTime::currentDateTimeUtc()};
+    BackupResult result;
+    QString manifest = "previous manifest";
+    QString error;
+    QVERIFY(!engine.backup({source.path()}, "computer/Documents/copy", {}, metadata,
+        provider, &manifest, &error, {}, &result));
+    QVERIFY(result.reported);
+    QCOMPARE(result.manifestVerified, !failManifest);
+    QCOMPARE(result.verifiedFiles, failAll ? 0 : 1);
+    QCOMPARE(result.issues.size(), failAll ? 3 : 2);
+    QCOMPARE(result.issues.first().path, source.filePath("bad-upload"));
+    QCOMPARE(result.issues.first().phase, QString("uploading"));
+    QCOMPARE(result.issues.first().reason, QString("Connection interrupted"));
+    if (failManifest) {
+        QVERIFY(manifest.isEmpty());
+        QCOMPARE(error, QString("Connection interrupted"));
+        return;
+    }
+    QVERIFY(!manifest.isEmpty());
+    QVector<BackupEntry> entries;
+    BackupManifestInfo info;
+    QVERIFY2(BackupManifest::load(manifest, &entries, &info, &error), qPrintable(error));
+    QCOMPARE(info.status, QString("incomplete"));
+    QCOMPARE(info.expectedItems.size(), 3);
+    QCOMPARE(info.failedItems.size(), result.issues.size());
+    QCOMPARE(entries.size(), result.verifiedFiles);
+    if (!failAll) {
+        QCOMPARE(result.issues.at(1).phase, QString("verifying"));
+        QVERIFY(engine.restoreFile(entries.first(), destination.path(), provider, &error));
+        QFile restored(destination.filePath("good"));
+        QVERIFY(restored.open(QIODevice::ReadOnly));
+        QCOMPARE(restored.readAll(), QByteArray("important content"));
+    }
+    QFile saved(manifest);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    const auto issues = QJsonDocument::fromJson(saved.readAll()).object().value("issues").toArray();
+    QCOMPARE(issues.size(), result.issues.size());
+    QCOMPARE(issues.first().toObject().value("reason").toString(), QString("Connection interrupted"));
 }
 
 void BackupEngineTest::rejectsMissingSource()

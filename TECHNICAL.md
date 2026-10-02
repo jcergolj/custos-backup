@@ -29,6 +29,10 @@ Each copy is stored independently below:
 Every copy has a manifest containing its computer, backup identity and name,
 copy, timestamp, completion state, expected items, failed items, paths, sizes,
 and checksums.
+New manifests also preserve an `issues` array containing each failed source path,
+phase, and reason. The existing `failed` path list remains compatible with older
+readers. An incomplete manifest can list an attempted path in both `expected`
+and `failed`; a verified entry cannot also be listed as failed.
 This provenance keeps similarly named backups on different computers distinct.
 
 The interface calls each saved configuration a **backup** and each run's output
@@ -88,8 +92,10 @@ Worker and run-state locks prevent deletion during a backup or queue update.
 ## Backup Progress And Remaining Time
 
 The engine reports planned file sizes, processed files and bytes, and a finalizing
-phase. The worker persists these progress samples in run state, throttled to
-approximately once per second except for initial progress and finalization.
+phase, along with verified file/byte counts, failed-item counts, current file and
+size, and reading/checking/uploading/verifying phases. The worker persists these
+progress samples in run state, throttled to approximately once per second except
+for initial progress, file/phase changes, and finalization.
 Processed counts include failed attempts; they describe work done, not verified
 backup contents. Manifest verification remains the authority for successful files.
 
@@ -104,6 +110,18 @@ The UI polls once per second while a backup is running and every five seconds
 otherwise. Expired estimates show **Taking longer than estimated…** rather than
 claiming zero remaining time. Manifest upload, verification, and post-backup
 cleanup show **Finalizing backup…** until the worker records its final result.
+
+The work-progress bar measures processed file attempts rather than upload bytes
+or verified contents. The CLI has no documented live byte-progress feed; the
+current path, planned size, and phase remain visible during single-file transfers.
+
+Run state also stores a structured `result` with verified payload counts, issues,
+and whether the remote manifest passed verification. Only a verified manifest with
+some verified entries can produce an **Incomplete** result. An attempt with no
+verified entries or a failed manifest produces **Failed**. Both retain automatic
+retry backoff. Only **Successful** runs trigger retention cleanup and update the
+historical duration used for estimates. Older run records without these fields
+remain readable and do not display invented verified-file counts.
 
 ## Retention And Cleanup
 

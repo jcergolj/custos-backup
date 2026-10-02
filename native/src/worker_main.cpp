@@ -170,10 +170,12 @@ int main(int argc, char *argv[])
         progressClock.start();
         progressSaveClock.start();
         const auto reportProgress = [&](const BackupProgress &progress) {
+            const bool phaseChanged = record.progress.phase != progress.phase
+                || (!progress.currentFile.isEmpty() && record.progress.currentFile != progress.currentFile);
             record.progress = progress;
             record.progressElapsedMs = progressClock.elapsed();
             record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
-            if (progress.processedFiles <= 1 || progress.finalizing
+            if (progress.processedFiles <= 1 || progress.finalizing || phaseChanged
                 || progress.processedFiles == progress.totalFiles || progressSaveClock.elapsed() >= 1000) {
                 QString progressError;
                 if (!runStore.save(&progressError)) {
@@ -182,7 +184,7 @@ int main(int argc, char *argv[])
                 progressSaveClock.restart();
             }
         };
-        if (engine.backup(setIterator->sourceDirectories, copyRoot, setIterator->exclusions, metadata, provider, &manifestPath, &error, reportProgress)) {
+        if (engine.backup(setIterator->sourceDirectories, copyRoot, setIterator->exclusions, metadata, provider, &manifestPath, &error, reportProgress, &record.result)) {
             record.progressElapsedMs = progressClock.elapsed();
             runStore.markSuccess(record, QDateTime::currentDateTime());
             qInfo().noquote() << setIterator->name << manifestPath;
@@ -212,11 +214,11 @@ int main(int argc, char *argv[])
         } else if (authenticationFailure(error)) {
             runStore.markAuthenticationRequired(record, error, QDateTime::currentDateTime());
             qCritical().noquote() << setIterator->name << error;
-        } else if (!manifestPath.isEmpty()) {
+        } else if (record.result.manifestVerified && record.result.verifiedFiles > 0) {
             runStore.markIncomplete(record, error, QDateTime::currentDateTime());
             qCritical().noquote() << setIterator->name << error << manifestPath;
         } else {
-            runStore.markRetrying(record, error, QDateTime::currentDateTime());
+            runStore.markFailed(record, error, QDateTime::currentDateTime());
             qCritical().noquote() << setIterator->name << error;
         }
 

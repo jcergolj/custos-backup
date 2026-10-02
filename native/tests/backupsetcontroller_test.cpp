@@ -28,6 +28,7 @@ private slots:
     void importIsBlockedWhileWorkerRuns();
     void successfulSaveNotifiesSchedulingButPreviewAndFailedSaveDoNot();
     void remainingTimeIsReportedForTheRunningSetOnly();
+    void reportsVerifiedCountsAndFailureDetailsWithoutInventingLegacyCounts();
 };
 
 void BackupSetControllerTest::remainingTimeIsReportedForTheRunningSetOnly()
@@ -52,9 +53,19 @@ void BackupSetControllerTest::remainingTimeIsReportedForTheRunningSetOnly()
     record.progress = {4000, 1000, 4, 1, false};
     record.progressElapsedMs = 10000;
     record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
+    record.progress.verifiedFiles = 1;
+    record.progress.failedItems = 1;
+    record.progress.currentFile = "/safe/large file";
+    record.progress.currentFileBytes = 3000;
+    record.progress.phase = "uploading";
     QVERIFY(runs.save());
     controller.refreshRunState();
     QVERIFY(controller.remainingTimes().value("documents").toString().startsWith("Est. remaining: 00:"));
+    const auto transfer = controller.transferProgress().value("documents").toMap();
+    QCOMPARE(transfer.value("fraction").toDouble(), 0.25);
+    QVERIFY(transfer.value("text").toString().contains("1 of 4 files processed · 1 verified · 1 items failed"));
+    QVERIFY(transfer.value("text").toString().contains("Uploading: /safe/large file"));
+    QVERIFY(!controller.transferProgress().contains("photos"));
     record.progress.finalizing = true;
     QVERIFY(runs.save());
     controller.refreshRunState();
@@ -63,6 +74,48 @@ void BackupSetControllerTest::remainingTimeIsReportedForTheRunningSetOnly()
     QVERIFY(runs.save());
     controller.refreshRunState();
     QVERIFY(controller.remainingTimes().isEmpty());
+    QVERIFY(controller.transferProgress().isEmpty());
+}
+
+void BackupSetControllerTest::reportsVerifiedCountsAndFailureDetailsWithoutInventingLegacyCounts()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    const QString configPath = home.filePath("settings.json");
+    BackupConfig config;
+    config.sets = {{"documents", "Documents", "/my-files/backups", {"/safe/documents"}, {}}};
+    QVERIFY(BackupConfigStore(configPath).save(config));
+    BackupRunStore runs(home.filePath("omacustos-backup-runs.json"));
+    runs.ensureSet("documents");
+    auto &record = *runs.find("documents");
+    runs.markIncomplete(record, "Backup incomplete", QDateTime::currentDateTimeUtc());
+    record.result = {true, true, 97, 1000, {{"/safe/a", "uploading", "Connection interrupted"},
+        {"/safe/b", "uploading", "Connection interrupted"}, {"/safe/c", "reading", "Permission denied"}}};
+    QVERIFY(runs.save());
+    BackupEngine engine;
+    BackupSetController controller(engine, configPath);
+    QCOMPARE(controller.recentBackups().first(), QString("Documents\nIncomplete"));
+    auto details = controller.runDetails().value("documents").toMap();
+    QCOMPARE(details.value("summary").toString(), QString("97 files backed up · 3 items failed"));
+    const auto issues = details.value("issues").toList();
+    QCOMPARE(issues.size(), 3);
+    QCOMPARE(issues.last().toMap().value("path").toString(), QString("/safe/c"));
+    QCOMPARE(issues.last().toMap().value("reason").toString(), QString("Permission denied"));
+    record.result.manifestVerified = false;
+    runs.markFailed(record, "Unable to upload manifest", QDateTime::currentDateTimeUtc());
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    details = controller.backupDetails("documents");
+    QCOMPARE(details.value("status").toString(), QString("Failed"));
+    QVERIFY(details.value("summary").toString().isEmpty());
+    QCOMPARE(details.value("error").toString(), QString("Unable to upload manifest"));
+    record.result = {};
+    record.status = "success";
+    record.lastError.clear();
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QVERIFY(controller.backupDetails("documents").value("summary").toString().isEmpty());
+    QCOMPARE(controller.recentBackups().first(), QString("Documents\nSuccessful"));
 }
 
 void BackupSetControllerTest::successfulSaveNotifiesSchedulingButPreviewAndFailedSaveDoNot()

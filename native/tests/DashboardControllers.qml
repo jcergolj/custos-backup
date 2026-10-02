@@ -71,6 +71,8 @@ QtObject {
         property string currentRunError: ""
         property var runningSetIds: []
         property var remainingTimes: ({})
+        property var transferProgress: ({})
+        property var runDetails: ({})
         property var recentBackups: ["Photos\nNo backup run yet", "Documents\nsucceeded"]
         property var recentBackupSetIds: ["photos-id", "documents-id"]
         property var recentBackupTimestamps: ["", "01/10/2026 10:00:00"]

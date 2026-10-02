@@ -335,6 +335,90 @@ ApplicationWindow {
         onRejected: recentBackupCopies.cancelDelete()
     }
 
+    Dialog {
+        id: backupDetailsDialog
+        objectName: "backupDetailsDialog"
+        anchors.centerIn: parent
+        property string setId: ""
+        readonly property var details: backupSetController.runDetails[setId] || ({})
+        title: qsTr("Backup details")
+        width: Math.min(root.width - 2 * root.contentPadding, 640)
+        height: Math.min(root.height - 2 * root.contentPadding, 500)
+        modal: true
+        standardButtons: Dialog.Close
+
+        contentItem: ScrollView {
+            clip: true
+            contentWidth: availableWidth
+            ColumnLayout {
+                width: parent.width
+                spacing: 12
+                Label {
+                    objectName: "backupDetailsStatus"
+                    text: backupDetailsDialog.details.status || ""
+                    font.weight: Font.DemiBold
+                    textFormat: Text.PlainText
+                }
+                Label {
+                    objectName: "backupDetailsSummary"
+                    text: backupDetailsDialog.details.summary || ""
+                    visible: text.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    objectName: "backupDetailsError"
+                    text: backupDetailsDialog.details.error || ""
+                    visible: text.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WrapAnywhere
+                    Layout.fillWidth: true
+                }
+                Label {
+                    text: qsTr("Next retry: %1").arg(backupDetailsDialog.details.nextAttempt || "")
+                    visible: (backupDetailsDialog.details.nextAttempt || "").length > 0
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    text: backupDetailsDialog.details.copyPath || ""
+                    visible: text.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WrapAnywhere
+                    color: root.mutedColor
+                    Layout.fillWidth: true
+                }
+                Repeater {
+                    objectName: "backupIssues"
+                    model: backupDetailsDialog.details.issues || []
+                    delegate: ColumnLayout {
+                        id: issueRow
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        spacing: 4
+                        Label {
+                            objectName: "backupIssuePath-" + issueRow.index
+                            text: issueRow.modelData.path
+                            textFormat: Text.PlainText
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.WrapAnywhere
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            objectName: "backupIssueReason-" + issueRow.index
+                            text: qsTr("%1: %2").arg(issueRow.modelData.phase).arg(issueRow.modelData.reason)
+                            textFormat: Text.PlainText
+                            wrapMode: Text.WrapAnywhere
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -565,6 +649,27 @@ ApplicationWindow {
                                                 Layout.fillWidth: true
                                                 Layout.minimumWidth: 0
                                             }
+
+                                            Label {
+                                                objectName: "setTransferProgress-" + setRow.index
+                                                text: (backupSetController.transferProgress[backupSetController.setIds[setRow.index]] || {}).text || ""
+                                                visible: setRow.runActive && text.length > 0
+                                                textFormat: Text.PlainText
+                                                font.pixelSize: root.metadataTypeSize
+                                                wrapMode: Text.WrapAnywhere
+                                                Layout.fillWidth: true
+                                                Layout.minimumWidth: 0
+                                            }
+
+                                            ProgressBar {
+                                                objectName: "setProgressBar-" + setRow.index
+                                                readonly property var progress: backupSetController.transferProgress[backupSetController.setIds[setRow.index]] || ({})
+                                                visible: setRow.runActive
+                                                value: progress.fraction || 0
+                                                indeterminate: progress.indeterminate === undefined || progress.indeterminate
+                                                Accessible.name: qsTr("Backup work processed")
+                                                Layout.fillWidth: true
+                                            }
                                         }
 
                                         BusyIndicator {
@@ -663,8 +768,9 @@ ApplicationWindow {
                                     required property int index
                                     required property string modelData
                                     readonly property string timestamp: backupSetController.recentBackupTimestamps[index] || ""
+                                    readonly property var details: backupSetController.runDetails[backupSetController.recentBackupSetIds[index]] || ({})
                                     width: recentBackupsList.width
-                                    implicitHeight: 80
+                                    implicitHeight: Math.max(80, recentText.implicitHeight + 40)
                                     padding: 20
                                     background: Rectangle {
                                         color: root.softColor
@@ -675,21 +781,37 @@ ApplicationWindow {
                                         anchors.fill: parent
                                         spacing: 16
 
-                                        Label {
-                                            id: recentSummary
-                                            objectName: "recentSummary-" + recentRow.index
-                                            text: recentRow.modelData.replace(/\s*\r?\n\s*/g, " · ")
-                                                + (recentRow.timestamp.length > 0 ? " · " + recentRow.timestamp : "")
-                                            font.pixelSize: root.bodyTypeSize
-                                            wrapMode: Text.NoWrap
-                                            elide: Text.ElideRight
-                                            maximumLineCount: 1
+                                        ColumnLayout {
+                                            id: recentText
                                             Layout.fillWidth: true
                                             Layout.minimumWidth: 0
-                                            ToolTip.visible: recentSummaryHover.hovered && truncated
-                                            ToolTip.text: text
+                                            spacing: 4
+                                            Label {
+                                                id: recentSummary
+                                                objectName: "recentSummary-" + recentRow.index
+                                                text: recentRow.modelData.replace(/\s*\r?\n\s*/g, " · ")
+                                                    + (recentRow.timestamp.length > 0 ? " · " + recentRow.timestamp : "")
+                                                textFormat: Text.PlainText
+                                                font.pixelSize: root.bodyTypeSize
+                                                wrapMode: Text.NoWrap
+                                                elide: Text.ElideRight
+                                                maximumLineCount: 1
+                                                Layout.fillWidth: true
+                                                Layout.minimumWidth: 0
+                                                ToolTip.visible: recentSummaryHover.hovered && truncated
+                                                ToolTip.text: text
 
-                                            HoverHandler { id: recentSummaryHover }
+                                                HoverHandler { id: recentSummaryHover }
+                                            }
+                                            Label {
+                                                objectName: "recentResultSummary-" + recentRow.index
+                                                text: recentRow.details.summary || ""
+                                                visible: text.length > 0
+                                                textFormat: Text.PlainText
+                                                font.pixelSize: root.metadataTypeSize
+                                                wrapMode: Text.WordWrap
+                                                Layout.fillWidth: true
+                                            }
                                         }
 
                                         ActionButton {
@@ -734,6 +856,15 @@ ApplicationWindow {
                                                         && backupSetController.setIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) >= 0
                                                         && backupSetController.runningSetIds.indexOf(backupSetController.recentBackupSetIds[recentRow.index]) < 0
                                                     onTriggered: recentBackupCopies.requestDelete(backupSetController.recentBackupSetIds[recentRow.index])
+                                                }
+                                                MenuItem {
+                                                    objectName: "viewBackupDetails-" + recentRow.index
+                                                    text: qsTr("View details")
+                                                    enabled: (recentRow.details.status || "").length > 0
+                                                    onTriggered: {
+                                                        backupDetailsDialog.setId = backupSetController.recentBackupSetIds[recentRow.index]
+                                                        backupDetailsDialog.open()
+                                                    }
                                                 }
                                             }
                                         }
@@ -1445,6 +1576,16 @@ ApplicationWindow {
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
+            }
+
+            Label {
+                objectName: "editorTransferProgress"
+                text: (backupSetController.transferProgress[backupSetController.currentId] || {}).text || ""
+                visible: root.backupRunning && text.length > 0
+                textFormat: Text.PlainText
+                font.pixelSize: root.metadataTypeSize
+                wrapMode: Text.WrapAnywhere
+                Layout.fillWidth: true
             }
 
         }

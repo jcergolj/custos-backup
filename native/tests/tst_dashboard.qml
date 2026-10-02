@@ -40,6 +40,8 @@ TestCase {
         backupSetController.currentIndex = 0
         backupSetController.runningSetIds = []
         backupSetController.remainingTimes = {}
+        backupSetController.transferProgress = {}
+        backupSetController.runDetails = {}
         backupSetController.removedIndex = -1
         backupSetController.addedCount = 0
         backupSetController.refreshCount = 0
@@ -210,6 +212,68 @@ TestCase {
         tryCompare(remaining, "text", "Finalizing backup…")
         backupSetController.runningSetIds = []
         tryCompare(remaining, "visible", false)
+    }
+
+    function test_transferProgressShowsCurrentFileAndKeepsFailuresSeparate() {
+        backupSetController.runningSetIds = ["photos-id"]
+        backupSetController.transferProgress = {
+            "photos-id": {
+                text: "2 of 4 files processed · 1 verified · 1 items failed\nUploading: /safe/large file (2 GiB)",
+                fraction: 0.5, indeterminate: false
+            }
+        }
+        const progress = control("setTransferProgress-1")
+        tryCompare(progress, "visible", true)
+        verify(progress.text.indexOf("1 verified · 1 items failed") >= 0)
+        verify(progress.text.indexOf("Uploading: /safe/large file") >= 0)
+        const bar = control("setProgressBar-1")
+        compare(bar.value, 0.5)
+        compare(bar.indeterminate, false)
+        backupSetController.transferProgress = {
+            "photos-id": { text: "4 of 4 files processed · 3 verified · 1 items failed", fraction: 1, indeterminate: true }
+        }
+        tryCompare(bar, "indeterminate", true)
+        backupSetController.runningSetIds = []
+        tryCompare(progress, "visible", false)
+        compare(bar.visible, false)
+    }
+
+    function test_incompleteResultDetailsShowPathsAndReasonsAndAllowRestore() {
+        backupSetController.recentBackups = ["Photos\nNo backup run yet", "Documents\nIncomplete"]
+        backupSetController.runDetails = {
+            "documents-id": {
+                status: "Incomplete", summary: "97 files backed up · 3 items failed",
+                copyPath: "/backups/documents-id/copy", error: "Backup incomplete", nextAttempt: "02/10/2026 12:00:00",
+                issues: [
+                    { path: "/safe/a", phase: "Uploading", reason: "Connection interrupted" },
+                    { path: "/safe/b", phase: "Uploading", reason: "Connection interrupted" },
+                    { path: "/safe/c", phase: "Reading", reason: "Permission denied" }
+                ]
+            }
+        }
+        tryCompare(control("recentResultSummary-1"), "text", "97 files backed up · 3 items failed")
+        verify(control("recentResultSummary-1").visible)
+        verify(control("restore-1").enabled)
+        const menu = openRecentMenu(1)
+        compare(menu.itemAt(1).text, "View details")
+        verify(menu.itemAt(1).enabled)
+        mouseClick(menu.itemAt(1))
+        const dialog = control("backupDetailsDialog")
+        tryCompare(dialog, "opened", true)
+        compare(dialog.setId, "documents-id")
+        compare(control("backupDetailsStatus").text, "Incomplete")
+        compare(control("backupDetailsSummary").text, "97 files backed up · 3 items failed")
+        const issues = control("backupIssues")
+        tryCompare(issues, "count", 3)
+        const lastIssue = issues.itemAt(2)
+        verify(lastIssue !== null)
+        compare(findChild(lastIssue, "backupIssuePath-2").text, "/safe/c")
+        compare(findChild(lastIssue, "backupIssueReason-2").text, "Reading: Permission denied")
+        // An open dialog must stay tied to its backup identity when history reorders.
+        backupSetController.recentBackupSetIds = ["documents-id", "photos-id"]
+        compare(dialog.setId, "documents-id")
+        mouseClick(dialog.standardButton(Dialog.Close))
+        tryCompare(dialog, "visible", false)
     }
 
     function test_setDeletionUsesIdentityAfterListOrderChanges() {

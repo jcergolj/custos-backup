@@ -114,10 +114,7 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         }
         expectedSet = QSet<QString>(expectedItems.cbegin(), expectedItems.cend());
         const QSet<QString> failedSet(failedItems.cbegin(), failedItems.cend());
-        if (expectedSet.size() != expectedItems.size() || failedSet.size() != failedItems.size()
-            || std::any_of(failedItems.cbegin(), failedItems.cend(), [&expectedSet](const QString &item) {
-                return expectedSet.contains(item);
-            })) {
+        if (expectedSet.size() != expectedItems.size() || failedSet.size() != failedItems.size()) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup manifest is malformed or unsupported.");
             }
@@ -167,7 +164,7 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
             || containsParentSegment || !sizeValue.isDouble()
             || sizeValue.toDouble() < 0 || sizeValue.toDouble() != qFloor(sizeValue.toDouble())
             || !validChecksum(checksumText)
-            || (version == 2 && !expectedSet.contains(restorePath))) {
+            || (version == 2 && (!expectedSet.contains(restorePath) || failedItems.contains(restorePath)))) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup manifest contains an unsafe path.");
             }

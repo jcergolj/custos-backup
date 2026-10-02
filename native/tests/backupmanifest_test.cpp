@@ -16,6 +16,7 @@ private slots:
     void acceptsDotsInsideFileNames();
     void acceptsAbsoluteRemotePaths();
     void rejectsCompleteCopyWithMissingExpectedEntry();
+    void rejectsFailedEntryPresentedAsVerified();
     void rejectsMalformedEntries();
     void rejectsNullOutput();
     void restoresOnlyTheSelectedFile();
@@ -236,6 +237,19 @@ void BackupManifestTest::rejectsMalformedEntries()
     QString error;
     QVERIFY(!BackupManifest::load(path, &entries, &error));
     QCOMPARE(error, QStringLiteral("The backup manifest contains an unsafe path."));
+}
+
+void BackupManifestTest::rejectsFailedEntryPresentedAsVerified()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QFile file(directory.filePath("manifest.json"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({"version":2,"application":"omacustos","computer":"computer","set_id":"set","copy_id":"copy","created_at":"2026-09-28T12:00:00.000Z","status":"incomplete","expected":["file.txt"],"failed":["file.txt"],"entries":[{"source":"/safe/file.txt","remote":"copy/file.txt","restore":"file.txt","size":12,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]})");
+    file.close();
+    QVector<BackupEntry> entries;
+    QVERIFY(!BackupManifest::load(file.fileName(), &entries));
+    QVERIFY(entries.isEmpty());
 }
 
 void BackupManifestTest::rejectsNullOutput()

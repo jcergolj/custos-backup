@@ -234,8 +234,18 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     return backup(sourceDirectories, remoteRoot, exclusions, {}, provider, manifestPath, error);
 }
 
-bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error, const std::function<void(const BackupProgress &)> &reportProgress) const
+bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error, const std::function<void(const BackupProgress &)> &reportProgress, BackupResult *result) const
 {
+    BackupResult outcome;
+    outcome.reported = true;
+    const auto finishResult = qScopeGuard([&] {
+        if (result != nullptr) {
+            *result = outcome;
+        }
+    });
+    if (manifestPath != nullptr) {
+        manifestPath->clear();
+    }
     if (error != nullptr) {
         error->clear();
     }
@@ -250,6 +260,16 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
 
     const BackupPreview selection = preview(sourceDirectories, exclusions);
+    for (const QString &path : selection.missingPaths) {
+        outcome.issues.append({path, QStringLiteral("selection"), QStringLiteral("The source path does not exist.")});
+    }
+    for (const QString &path : selection.skippedPaths) {
+        const QFileInfo file(path);
+        outcome.issues.append({path, QStringLiteral("selection"), file.isSymLink()
+            ? QStringLiteral("Symbolic links are not backed up.")
+            : !file.isReadable() ? QStringLiteral("The source path is unreadable.")
+                                 : QStringLiteral("The source path is not a regular file or folder.")});
+    }
     if (selection.includedFiles.isEmpty()) {
         if (error != nullptr) {
             *error = QStringLiteral("The selected folder contains no regular files.");
@@ -259,6 +279,8 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
 
     BackupProgress progress;
+    progress.failedItems = outcome.issues.size();
+    progress.phase = QStringLiteral("preparing");
     progress.totalFiles = selection.includedFiles.size();
     QHash<QString, qint64> plannedSizes;
     for (const QString &path : selection.includedFiles) {
@@ -271,7 +293,6 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
 
     QJsonArray entries;
-    QStringList failures;
     QStringList expectedItems;
     QStringList failedItems;
     QStringList sourcePrefixes;
@@ -301,6 +322,8 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         const auto finishedFile = qScopeGuard([&] {
             ++progress.processedFiles;
             progress.processedBytes += plannedSizes.value(sourcePath);
+            progress.currentFile.clear();
+            progress.currentFileBytes = 0;
             if (reportProgress) {
                 reportProgress(progress);
             }
@@ -330,47 +353,59 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         expectedItems.append(mappedPath);
         providerError.clear();
 
+        const auto failFile = [&](const QString &phase, const QString &reason) {
+            outcome.issues.append({sourcePath, phase, reason});
+            failedItems.append(mappedPath);
+            ++progress.failedItems;
+        };
+        const auto reportPhase = [&](const QString &phase) {
+            progress.currentFile = sourcePath;
+            progress.currentFileBytes = plannedSizes.value(sourcePath);
+            progress.phase = phase;
+            if (reportProgress) {
+                reportProgress(progress);
+            }
+        };
+        reportPhase(QStringLiteral("reading"));
+
         QFile sourceFile(sourcePath);
         if (!sourceFile.open(QIODevice::ReadOnly)) {
-            failures.append(QStringLiteral("The source file could not be read."));
-            failedItems.append(mappedPath);
+            failFile(QStringLiteral("reading"), QStringLiteral("The source file could not be read: %1").arg(sourceFile.errorString()));
             continue;
         }
         const qint64 sourceSize = sourceFile.size();
         QByteArray sourceChecksum;
         if (!sha256(sourceFile, &sourceChecksum)) {
-            failures.append(QStringLiteral("The source file could not be read."));
-            failedItems.append(mappedPath);
+            failFile(QStringLiteral("reading"), QStringLiteral("The source file could not be read: %1").arg(sourceFile.errorString()));
             continue;
         }
         RemoteFile remoteFile;
+        reportPhase(QStringLiteral("checking"));
         const bool alreadyVerified = provider.inspect(remotePath, &remoteFile, &providerError)
             && remoteFile.size == sourceSize
             && (remoteFile.checksum.isEmpty() || remoteFile.checksum == sourceChecksum);
 
         if (!alreadyVerified) {
             if (!provider.ensureDirectory(QFileInfo(remotePath).path(), &providerError)) {
-                failures.append(providerError.isEmpty()
+                failFile(QStringLiteral("preparing"), providerError.isEmpty()
                     ? QStringLiteral("The remote folder could not be created.")
                     : providerError);
-                failedItems.append(mappedPath);
                 continue;
             }
+            reportPhase(QStringLiteral("uploading"));
             if (!provider.upload(sourcePath, remotePath, &providerError)) {
-                failures.append(providerError.isEmpty()
+                failFile(QStringLiteral("uploading"), providerError.isEmpty()
                     ? QStringLiteral("The file could not be uploaded.")
                     : providerError);
-                failedItems.append(mappedPath);
                 continue;
             }
-
+            reportPhase(QStringLiteral("verifying"));
             if (!provider.inspect(remotePath, &remoteFile, &providerError)
                 || remoteFile.size != sourceSize
                 || (!remoteFile.checksum.isEmpty() && remoteFile.checksum != sourceChecksum)) {
-                failures.append(providerError.isEmpty()
+                failFile(QStringLiteral("verifying"), providerError.isEmpty()
                     ? QStringLiteral("Remote verification failed.")
                     : providerError);
-                failedItems.append(mappedPath);
                 continue;
             }
         }
@@ -382,9 +417,14 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
             {QStringLiteral("size"), sourceSize},
             {QStringLiteral("sha256"), QString::fromLatin1(sourceChecksum.toHex())},
         });
+        ++outcome.verifiedFiles;
+        outcome.verifiedBytes += sourceSize;
+        progress.verifiedFiles = outcome.verifiedFiles;
+        progress.verifiedBytes = outcome.verifiedBytes;
     }
 
     progress.finalizing = true;
+    progress.phase = QStringLiteral("finalizing");
     if (reportProgress) {
         reportProgress(progress);
     }
@@ -399,7 +439,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
     const QString path = QDir(manifestDirectory).filePath(QStringLiteral("manifest.json"));
     QSaveFile manifest(path);
-    const bool incomplete = !failures.isEmpty() || !selection.missingPaths.isEmpty() || !selection.skippedPaths.isEmpty();
+    const bool incomplete = !outcome.issues.isEmpty();
     failedItems.append(selection.missingPaths);
     failedItems.append(selection.skippedPaths);
     expectedItems.removeDuplicates();
@@ -408,6 +448,12 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         {QStringLiteral("version"), metadata.copyId.isEmpty() ? 1 : 2},
         {QStringLiteral("entries"), entries},
     };
+    QJsonArray issues;
+    for (const BackupIssue &issue : outcome.issues) {
+        issues.append(QJsonObject {{QStringLiteral("path"), issue.path},
+            {QStringLiteral("phase"), issue.phase}, {QStringLiteral("reason"), issue.reason}});
+    }
+    manifestObject.insert(QStringLiteral("issues"), issues);
     if (!metadata.copyId.isEmpty()) {
         manifestObject.insert(QStringLiteral("application"), QStringLiteral("omacustos"));
         manifestObject.insert(QStringLiteral("computer"), metadata.computerName);
@@ -446,9 +492,6 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         return false;
     }
 
-    if (manifestPath != nullptr) {
-        *manifestPath = path;
-    }
     RemoteFile remoteManifest;
     if (!provider.inspect(remoteManifestPath, &remoteManifest, &providerError)
         || remoteManifest.size != QFileInfo(path).size()) {
@@ -458,10 +501,17 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         return false;
     }
 
+    outcome.manifestVerified = true;
+    if (manifestPath != nullptr) {
+        *manifestPath = path;
+    }
+
     if (incomplete) {
         if (error != nullptr) {
-            *error = QStringLiteral("Backup incomplete: %1 item(s) could not be verified.")
-                .arg(failures.size() + selection.missingPaths.size() + selection.skippedPaths.size());
+            *error = (outcome.verifiedFiles > 0
+                ? QStringLiteral("Backup incomplete: %1 files backed up · %2 items failed.")
+                : QStringLiteral("Backup failed: %1 files backed up · %2 items failed."))
+                .arg(outcome.verifiedFiles).arg(outcome.issues.size());
         }
 
         return false;

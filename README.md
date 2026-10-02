@@ -71,11 +71,26 @@ in Proton Drive, and the latest three verified successful copies are kept.
 **Recent backups** shows the latest run for each saved backup set, rather than
 a row for every copy. Use **Restore** to choose an older remote copy.
 
+Results distinguish **Successful**, **Incomplete** (some verified files, with
+failures), and **Failed** (no verified restorable copy). Completed copies show the
+verified-file count and failed-item count. Open **⋯ → View details** for affected
+paths, failure reasons, and the next automatic retry. An incomplete copy still
+allows restoring its verified files; it does not replace an older successful copy
+for retention purposes. Failed items can include missing or unreadable folders,
+so they are counted as items rather than always as individual files.
+
 While a backup runs, its row shows an estimated remaining time. New backups show
 **Estimating time remaining…** until enough progress is available; later runs can
 start with an estimate based on their previous successful run. Estimates update
 as files finish and may change with transfer speed. During final checks, the row
 shows **Finalizing backup…**.
+
+The running backup also shows a work-progress bar, processed and verified file
+counts, failures, and the current file's path and size. Its phase distinguishes
+reading, uploading, and verification. The bar advances as file attempts finish;
+failed attempts count as processed work, never as verified files. The CLI does not
+expose documented live byte progress, so a large file stays at its current step
+while being transferred.
 
 **Advanced settings** lets you change the remote folder and number of copies
 to keep, or run only on AC power.
