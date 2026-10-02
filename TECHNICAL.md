@@ -168,6 +168,15 @@ persisted so the next attempt resumes without expanding the deletion scope.
 
 ## Restore Safety
 
+CLI downloads use a private staging directory so their remote-basename conflict
+handling cannot remove destination files or unrelated files and folders. Restore
+payloads stay in private staging until size and SHA-256 verification passes.
+Verified bytes replace the destination atomically with `QSaveFile`, with direct
+write fallback disabled. Download, verification, or placement failures preserve
+existing destination content, and staging is cleaned up on every return path.
+Destination and parent symlink checks are repeated after the transfer before
+committing the replacement.
+
 Opening Restore lists only direct copy folders for the selected backup, using
 the recorded run's copy parent when available and the configured computer/backup
 folder otherwise. Listing runs in a background task; it does not traverse payload

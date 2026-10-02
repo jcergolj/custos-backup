@@ -1,5 +1,7 @@
 #include <QTest>
 
+#include <functional>
+
 #include "../src/backupengine.h"
 #include "../src/protonprovider.h"
 #include "protonclifixture.h"
@@ -18,6 +20,20 @@ QByteArray readFile(const QString &path)
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
+
+class AfterDownloadRunner final : public ProcessRunner
+{
+public:
+    FilesystemRunner fixture;
+    std::function<void()> afterDownload;
+
+    ProcessOutput run(const QStringList &arguments) override
+    {
+        const ProcessOutput output = fixture.run(arguments);
+        if (arguments.value(1) == "download" && output.successful() && afterDownload) afterDownload();
+        return output;
+    }
+};
 
 }
 
@@ -41,6 +57,10 @@ private slots:
     void successfulRestorePreservesUnrelatedBasename_data();
     void successfulRestorePreservesUnrelatedBasename();
     void finalPlacementFailurePreservesExistingFolder();
+    void finalPlacementFailurePreservesReadOnlyFile();
+    void rejectsUnsafeRestoreDestinations_data();
+    void rejectsUnsafeRestoreDestinations();
+    void rejectsDestinationSymlinkIntroducedDuringDownload();
 };
 
 void ProtonCliFixtureTest::transfersKeepBasenamesAndParentFolders()
@@ -311,6 +331,102 @@ void ProtonCliFixtureTest::finalPlacementFailurePreservesExistingFolder()
     QCOMPARE(QDir(destination.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList {"notes.txt"});
     QVERIFY(!provider.download("/copy/notes.txt", destination.filePath("notes.txt"), &error));
     QCOMPARE(readFile(destination.filePath("notes.txt/keep.txt")), QByteArray("existing folder child"));
+}
+
+void ProtonCliFixtureTest::finalPlacementFailurePreservesReadOnlyFile()
+{
+    QTemporaryDir destination;
+    FilesystemRunner runner;
+    QVERIFY(destination.isValid() && runner.remote.isValid());
+    const QByteArray replacement("verified replacement");
+    QVERIFY(writeFile(runner.remoteFile("/copy/notes.txt"), replacement));
+    const QString existing = destination.filePath("notes.txt");
+    QVERIFY(writeFile(existing, "existing destination"));
+    QVERIFY(QFile::setPermissions(existing, QFileDevice::ReadOwner));
+    const BackupEntry entry {"/source/notes.txt", "/copy/notes.txt", replacement.size(),
+        QCryptographicHash::hash(replacement, QCryptographicHash::Sha256), "notes.txt"};
+    ProtonProvider provider(runner);
+    BackupEngine engine;
+    QString error;
+    QVERIFY(!engine.restoreFile(entry, destination.path(), provider, &error));
+    QCOMPARE(error, QString("The restored file could not be placed in the destination folder."));
+    QCOMPARE(readFile(existing), QByteArray("existing destination"));
+    QCOMPARE(QDir(destination.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList {"notes.txt"});
+    QCOMPARE(runner.downloadedFolders.size(), 1);
+    QVERIFY(!QFileInfo::exists(runner.downloadedFolders.first()));
+}
+
+void ProtonCliFixtureTest::rejectsUnsafeRestoreDestinations_data()
+{
+    QTest::addColumn<QString>("scenario");
+    QTest::newRow("parent traversal") << QString("../notes.txt");
+    QTest::newRow("absolute path") << QString("/notes.txt");
+    QTest::newRow("destination symlink") << QString("file-link");
+    QTest::newRow("parent symlink") << QString("folder-link/notes.txt");
+    QTest::newRow("root symlink") << QString("root-link");
+}
+
+void ProtonCliFixtureTest::rejectsUnsafeRestoreDestinations()
+{
+    QFETCH(QString, scenario);
+    QTemporaryDir destination;
+    QTemporaryDir outside;
+    FilesystemRunner runner;
+    QVERIFY(destination.isValid() && outside.isValid() && runner.remote.isValid());
+    QVERIFY(writeFile(runner.remoteFile("/copy/notes.txt"), "replacement"));
+    QVERIFY(writeFile(outside.filePath("notes.txt"), "untouched outside file"));
+    QString root = destination.path();
+    QString restorePath = scenario;
+    if (scenario == "file-link") {
+        QVERIFY(QFile::link(outside.filePath("notes.txt"), destination.filePath(scenario)));
+    } else if (scenario == "folder-link/notes.txt") {
+        QVERIFY(QFile::link(outside.path(), destination.filePath("folder-link")));
+    } else if (scenario == "root-link") {
+        root = destination.filePath("root-link");
+        restorePath = "notes.txt";
+        QVERIFY(QFile::link(outside.path(), root));
+    }
+    const BackupEntry entry {"/source/notes.txt", "/copy/notes.txt", 11,
+        QCryptographicHash::hash("replacement", QCryptographicHash::Sha256), restorePath};
+    ProtonProvider provider(runner);
+    BackupEngine engine;
+    QString error;
+    QVERIFY(!engine.restoreFile(entry, root, provider, &error));
+    QCOMPARE(error, QString("The restore destination is outside the selected folder."));
+    QCOMPARE(readFile(outside.filePath("notes.txt")), QByteArray("untouched outside file"));
+    QVERIFY(runner.downloadedFolders.isEmpty());
+}
+
+void ProtonCliFixtureTest::rejectsDestinationSymlinkIntroducedDuringDownload()
+{
+    QTemporaryDir destination;
+    QTemporaryDir outside;
+    AfterDownloadRunner runner;
+    QVERIFY(destination.isValid() && outside.isValid() && runner.fixture.remote.isValid());
+    QVERIFY(writeFile(runner.fixture.remoteFile("/copy/notes.txt"), "replacement"));
+    const QString target = destination.filePath("notes.txt");
+    const QString outsideFile = outside.filePath("notes.txt");
+    QVERIFY(writeFile(target, "existing destination"));
+    QVERIFY(writeFile(outsideFile, "untouched outside file"));
+    bool redirected = false;
+    runner.afterDownload = [&] {
+        QVERIFY(QFile::remove(target));
+        QVERIFY(QFile::link(outsideFile, target));
+        redirected = true;
+    };
+    const BackupEntry entry {"/source/notes.txt", "/copy/notes.txt", 11,
+        QCryptographicHash::hash("replacement", QCryptographicHash::Sha256), "notes.txt"};
+    ProtonProvider provider(runner);
+    BackupEngine engine;
+    QString error;
+    QVERIFY(!engine.restoreFile(entry, destination.path(), provider, &error));
+    QVERIFY(redirected);
+    QCOMPARE(error, QString("The restore destination is outside the selected folder."));
+    QCOMPARE(readFile(outsideFile), QByteArray("untouched outside file"));
+    QVERIFY(QFileInfo(target).isSymLink());
+    QCOMPARE(QDir(destination.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList {"notes.txt"});
+    QCOMPARE(runner.fixture.downloadedFolders.size(), 1);
+    QVERIFY(!QFileInfo::exists(runner.fixture.downloadedFolders.first()));
 }
 
 QTEST_GUILESS_MAIN(ProtonCliFixtureTest)

@@ -613,8 +613,14 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         return false;
     }
 
-    const QString temporaryDestination = QStringLiteral("%1.omacustos-restore-%2")
-        .arg(destination, QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QTemporaryDir restoreStaging(QDir(destinationParent).filePath(QStringLiteral(".omacustos-restore-XXXXXX")));
+    if (!restoreStaging.isValid()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The restore staging folder could not be created.");
+        }
+        return false;
+    }
+    const QString temporaryDestination = restoreStaging.filePath(QStringLiteral("payload"));
     if (!provider.download(entry.remotePath, temporaryDestination, error)) {
         QFile::remove(temporaryDestination);
         return false;
@@ -640,6 +646,17 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
             *error = QStringLiteral("The restored file failed verification.");
         }
 
+        return false;
+    }
+
+    // Recheck after the transfer: QSaveFile follows destination symlinks, and
+    // neither a new symlink nor a changed parent may redirect verified content.
+    if (QFileInfo(destinationDirectory).isSymLink() || QFileInfo(destination).isSymLink()
+        || QFileInfo(destinationDirectory).canonicalFilePath() != canonicalRoot
+        || QFileInfo(destinationParent).canonicalFilePath() != canonicalParent) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The restore destination is outside the selected folder.");
+        }
         return false;
     }
 
