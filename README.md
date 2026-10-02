@@ -61,7 +61,9 @@ open a terminal, use the commands above.
 6. Press **Save**, then open the set's **⋯** menu and choose **Back up now**.
 
 Hidden paths such as `~/.config` are valid sources; select the folder or enter its
-full path in a source field. Use **Preview** to review included, excluded,
+full path in a source field. Folder backups include hidden files and hidden
+subdirectories by default, including `.env` and `.git`; use exclusions to omit
+any you do not want backed up. Use **Preview** to review included, excluded,
 skipped, and missing paths before running.
 
 Each named backup set has its own files, exclusions, and schedule. Every run

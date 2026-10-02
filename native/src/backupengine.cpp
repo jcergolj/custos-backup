@@ -178,7 +178,8 @@ BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const 
             continue;
         }
 
-        QDirIterator iterator(source.absoluteFilePath(), QDir::AllEntries | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        QDirIterator iterator(source.absoluteFilePath(), QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot,
+            QDirIterator::Subdirectories);
         while (iterator.hasNext()) {
             iterator.next();
             const QFileInfo file = iterator.fileInfo();

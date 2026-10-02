@@ -46,6 +46,10 @@ private slots:
     void rejectsMissingSource();
     void rejectsUnsafeRemoteRoot();
     void listsRegularFilesAndSkipsSymlinks();
+    void backsUpAndRestoresHiddenContents_data();
+    void backsUpAndRestoresHiddenContents();
+    void appliesExclusionsToHiddenContents();
+    void skipsHiddenSymbolicLinksUnlessExcluded();
     void backsUpVerifiesAndRestoresOneFile();
     void backsUpStoresVerifiedChecksum();
     void reservesManifestPathForSourceFiles();
@@ -493,6 +497,164 @@ void BackupEngineTest::reusesAnExistingVerifiedCopyOnRetry()
     QString error;
     QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
     QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
+}
+
+void BackupEngineTest::backsUpAndRestoresHiddenContents_data()
+{
+    QTest::addColumn<QString>("rootName");
+    QTest::newRow("visible root") << QStringLiteral("project");
+    QTest::newRow("hidden root") << QStringLiteral(".project");
+}
+
+void BackupEngineTest::backsUpAndRestoresHiddenContents()
+{
+    QFETCH(QString, rootName);
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(source.isValid() && remote.isValid() && destination.isValid());
+    const QDir root(source.filePath(rootName));
+    const QStringList payloads {"visible.txt", ".secret", ".config/settings", ".config/nested/.token", "nested/.env"};
+    QStringList expected;
+    for (const QString &relative : payloads) {
+        const QString path = root.filePath(relative);
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const QByteArray content = "content for " + relative.toUtf8();
+        QCOMPARE(file.write(content), qint64(content.size()));
+        expected.append(path);
+    }
+    expected.sort();
+
+    BackupEngine engine;
+    const BackupPreview preview = engine.preview({root.path()}, {});
+    QCOMPARE(preview.includedFiles, expected);
+    QVERIFY(preview.excludedFiles.isEmpty());
+    QVERIFY(preview.skippedPaths.isEmpty());
+    QVERIFY(preview.missingPaths.isEmpty());
+    // Directly selected hidden roots and files agree with folder traversal.
+    const QStringList hiddenEntries {root.filePath(".config/nested/.token"), root.filePath(".config/settings"),
+        root.filePath(".secret")};
+    QCOMPARE(engine.preview({root.filePath(".secret"), root.filePath(".config")}, {}).includedFiles, hiddenEntries);
+
+    LocalProvider provider(remote.path());
+    QString manifest;
+    QString error;
+    BackupResult result;
+    const BackupCopyMetadata metadata {"computer", "documents", "Documents", "copy", QDateTime::currentDateTimeUtc()};
+    QVERIFY2(engine.backup({root.path()}, "computer/Documents/copy", {}, metadata,
+        provider, &manifest, &error, {}, &result), qPrintable(error));
+    QVERIFY(result.manifestVerified);
+    QCOMPARE(result.verifiedFiles, payloads.size());
+    QVERIFY(result.issues.isEmpty());
+    QVector<BackupEntry> entries;
+    BackupManifestInfo info;
+    QVERIFY2(BackupManifest::load(manifest, &entries, &info, &error), qPrintable(error));
+    QCOMPARE(info.status, QString("complete"));
+    QCOMPARE(entries.size(), payloads.size());
+    QVERIFY(QDir(root.path()).removeRecursively());
+    QStringList restoredPaths;
+    for (const BackupEntry &entry : entries) {
+        QVERIFY2(engine.restoreFile(entry, destination.path(), provider, &error), qPrintable(error));
+        QFile restored(destination.filePath(entry.restorePath));
+        QVERIFY(restored.open(QIODevice::ReadOnly));
+        const QByteArray content = "content for " + entry.restorePath.toUtf8();
+        QCOMPARE(restored.readAll(), content);
+        QCOMPARE(entry.checksum, QCryptographicHash::hash(content, QCryptographicHash::Sha256));
+        restoredPaths.append(entry.restorePath);
+    }
+    QStringList sortedPayloads = payloads;
+    sortedPayloads.sort();
+    restoredPaths.sort();
+    QCOMPARE(restoredPaths, sortedPayloads);
+}
+
+void BackupEngineTest::appliesExclusionsToHiddenContents()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid() && remote.isValid());
+    const QStringList included {".env", ".config/settings", "other/.config/settings", ".git-old/keep"};
+    const QStringList excluded {".git/config", "nested/.git/objects/data", ".config/private/.env",
+        ".config/private/settings", "nested/.secret"};
+    QStringList expectedIncluded;
+    QStringList expectedExcluded;
+    for (const QString &relative : included + excluded) {
+        const QString path = source.filePath(relative);
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("content");
+        (included.contains(relative) ? expectedIncluded : expectedExcluded).append(path);
+    }
+    expectedIncluded.sort();
+    expectedExcluded.sort();
+    const QStringList rules {".git", source.filePath(".config/private"), source.filePath("nested/.secret")};
+    BackupEngine engine;
+    const BackupPreview preview = engine.preview({source.path()}, rules);
+    QCOMPARE(preview.includedFiles, expectedIncluded);
+    QCOMPARE(preview.excludedFiles, expectedExcluded);
+    QVERIFY(preview.skippedPaths.isEmpty());
+    QCOMPARE(engine.preview({source.filePath(".git")}, rules).excludedFiles, QStringList {source.filePath(".git")});
+    QCOMPARE(engine.preview({source.filePath("nested/.secret")}, rules).excludedFiles,
+        QStringList {source.filePath("nested/.secret")});
+
+    LocalProvider provider(remote.path());
+    QString manifest;
+    QString error;
+    QVERIFY2(engine.backup({source.path()}, "copy", rules, provider, &manifest, &error), qPrintable(error));
+    QVector<BackupEntry> entries;
+    QVERIFY2(BackupManifest::load(manifest, &entries, &error), qPrintable(error));
+    QStringList backedUp;
+    for (const BackupEntry &entry : entries) backedUp.append(entry.sourcePath);
+    backedUp.sort();
+    QCOMPARE(backedUp, expectedIncluded);
+    for (const QString &relative : excluded) QVERIFY(!QFileInfo::exists(remote.filePath("copy/" + relative)));
+}
+
+void BackupEngineTest::skipsHiddenSymbolicLinksUnlessExcluded()
+{
+    QTemporaryDir source;
+    QTemporaryDir outside;
+    QTemporaryDir remote;
+    QVERIFY(source.isValid() && outside.isValid() && remote.isValid());
+    for (const QString &path : {source.filePath(".env"), outside.filePath("outside.txt")}) {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("content");
+    }
+    const QString fileLink = source.filePath(".linked-file");
+    const QString folderLink = source.filePath(".linked-folder");
+    QVERIFY(QFile::link(outside.filePath("outside.txt"), fileLink));
+    QVERIFY(QFile::link(outside.path(), folderLink));
+    const QStringList links {fileLink, folderLink};
+    const QStringList rules {fileLink, ".linked-folder"};
+    BackupEngine engine;
+    LocalProvider provider(remote.path());
+    for (const bool excludeLinks : {false, true}) {
+        const QStringList exclusions = excludeLinks ? rules : QStringList {};
+        const BackupPreview preview = engine.preview({source.path()}, exclusions);
+        QCOMPARE(preview.includedFiles, QStringList {source.filePath(".env")});
+        QCOMPARE(preview.skippedPaths, excludeLinks ? QStringList {} : links);
+        QCOMPARE(preview.excludedFiles, excludeLinks ? links : QStringList {});
+        QString manifest;
+        QString error;
+        BackupResult result;
+        const QString copy = excludeLinks ? "excluded" : "skipped";
+        const BackupCopyMetadata metadata {"computer", "documents", "Documents", copy, QDateTime::currentDateTimeUtc()};
+        QCOMPARE(engine.backup({source.path()}, "computer/Documents/" + copy, exclusions, metadata,
+            provider, &manifest, &error, {}, &result), excludeLinks);
+        QVERIFY(result.manifestVerified);
+        QCOMPARE(result.verifiedFiles, 1);
+        QCOMPARE(result.issues.size(), excludeLinks ? 0 : 2);
+        for (const BackupIssue &issue : result.issues) {
+            QCOMPARE(issue.phase, QString("selection"));
+            QCOMPARE(issue.reason, QString("Symbolic links are not backed up."));
+        }
+        QVERIFY(!QFileInfo::exists(remote.filePath("computer/Documents/" + copy + "/.linked-file")));
+        QVERIFY(!QFileInfo::exists(remote.filePath("computer/Documents/" + copy + "/.linked-folder")));
+    }
 }
 
 void BackupEngineTest::listsRegularFilesAndSkipsSymlinks()

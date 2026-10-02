@@ -54,6 +54,12 @@ Bare names such as `node_modules` match directory names at every depth; regular
 files with the same name remain included. Matching is exact and case-sensitive.
 Excluded symbolic links and unreadable paths do not mark a copy incomplete.
 
+Folder traversal includes hidden regular files and hidden subdirectories, whether
+the selected root itself is hidden or visible. The same exclusion rules apply to
+hidden content. Symbolic links are never followed; hidden links are reported as
+skipped unless excluded. Restore verification reads payload paths from the
+manifest directly, so hidden payloads do not depend on provider directory listings.
+
 ## Provider Behavior
 
 The UI checks the CLI connection asynchronously with
