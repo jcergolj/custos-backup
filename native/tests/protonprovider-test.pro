@@ -5,9 +5,13 @@ TEMPLATE = app
 
 SOURCES += \
     protonprovider_test.cpp \
-    ../src/protonprovider.cpp
+    ../src/protonprovider.cpp \
+    ../src/backupengine.cpp \
+    ../src/backupmanifest.cpp
 
 HEADERS += \
     ../src/backupprovider.h \
     ../src/processrunner.h \
-    ../src/protonprovider.h
+    ../src/protonprovider.h \
+    ../src/backupengine.h \
+    ../src/backupmanifest.h

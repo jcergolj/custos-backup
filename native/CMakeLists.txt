@@ -167,6 +167,8 @@ add_test(NAME backupengine-test COMMAND backupengine-test)
 qt_add_executable(protonprovider-test
     tests/protonprovider_test.cpp
     src/protonprovider.cpp
+    src/backupengine.cpp
+    src/backupmanifest.cpp
 )
 
 target_link_libraries(protonprovider-test PRIVATE Qt6::Core Qt6::Test)

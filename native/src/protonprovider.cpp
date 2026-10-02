@@ -7,7 +7,10 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QTemporaryDir>
 #include <QtMath>
+
+#include <optional>
 
 ProtonProvider::ProtonProvider(ProcessRunner &runner)
     : runner(runner)
@@ -16,10 +19,41 @@ ProtonProvider::ProtonProvider(ProcessRunner &runner)
 
 bool ProtonProvider::upload(const QString &localPath, const QString &remotePath, QString *error)
 {
+    const QString remoteName = QFileInfo(remotePath).fileName();
+    if (!remotePath.startsWith('/') || remoteName.isEmpty() || remoteName == QStringLiteral(".")
+        || remotePath.split('/').contains(QStringLiteral(".."))) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The provider upload path is invalid.");
+        }
+        return false;
+    }
+
+    QString uploadPath = localPath;
+    std::optional<QTemporaryDir> staging;
+    if (QFileInfo(localPath).fileName() != remoteName) {
+        staging.emplace(QDir::temp().filePath(QStringLiteral("omacustos-upload-XXXXXX")));
+        if (!staging->isValid()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The Proton Drive upload staging folder could not be created.");
+            }
+            return false;
+        }
+        // The CLI retains local basenames; stage privately rather than renaming
+        // the source or using an intermediate remote name that could collide.
+        uploadPath = staging->filePath(remoteName);
+        QFile source(localPath);
+        if (!source.copy(uploadPath)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The file could not be staged for Proton Drive upload: %1").arg(source.errorString());
+            }
+            return false;
+        }
+    }
+
     return run({
         QStringLiteral("filesystem"), QStringLiteral("upload"), QStringLiteral("-j"),
         QStringLiteral("-f"), QStringLiteral("replace"), QStringLiteral("-d"), QStringLiteral("replace"),
-        QStringLiteral("-t"), localPath, QFileInfo(remotePath).path(),
+        QStringLiteral("-t"), uploadPath, QFileInfo(remotePath).path(),
     }, error);
 }
 
