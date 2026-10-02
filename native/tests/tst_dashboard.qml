@@ -49,6 +49,12 @@ TestCase {
         backupSetController.recentBackupTimestamps = ["", "01/10/2026 10:00:00"]
         backupLauncher.launchedId = ""
         restoreController.discoveredRoot = ""
+        restoreController.entries = []
+        restoreController.copies = []
+        restoreController.unavailableEntries = []
+        restoreController.restoredIndexes = []
+        restoreController.restoreDestination = ""
+        restoreController.restoreCount = 0
         protonFolderBrowser.requestedPath = ""
         protonFolderBrowser.busy = false
         recentBackupCopies.busy = false
@@ -67,11 +73,15 @@ TestCase {
         tryVerify(function () {
             item = findChild(app, name)
             if (item === null) {
-                for (const listName of ["dashboardSetsList", "recentBackupsList"]) {
+                for (const listName of ["dashboardSetsList", "recentBackupsList", "restoreFilesList"]) {
                     const list = findChild(app, listName)
                     for (let index = 0; list && index < list.count; ++index) {
                         const row = list.itemAtIndex(index)
                         if (row) {
+                            if (row.objectName === name) {
+                                item = row
+                                return true
+                            }
                             item = findChild(row, name)
                             if (item) {
                                 return true
@@ -213,6 +223,73 @@ TestCase {
         compare(control("restore-1").enabled, false)
         mouseClick(control("restore-1"))
         compare(restoreController.discoveredRoot, "")
+    }
+
+    function showRestoreFiles() {
+        mouseClick(control("restore-1"))
+        restoreController.copies = ["Computer / Documents / copy-id"]
+        restoreController.entries = ["/safe/documents/notes.txt", "/safe/documents/photo.jpg"]
+        const scroll = control("dashboardScrollView").contentItem
+        waitForRendering(app.contentItem)
+        const files = control("restoreFilesList")
+        scroll.contentY = files.mapToItem(scroll.contentItem, 0, 0).y
+        waitForRendering(app.contentItem)
+    }
+
+    function test_restoreRequiresTickedFilesAndDestinationAndHasOneAction() {
+        showRestoreFiles()
+        const start = control("startRestoreButton")
+        const destination = control("restoreDestinationField")
+        compare(start.text, "Start restore")
+        compare(start.enabled, false)
+        compare(destination.text, "")
+        verify(control("restoreInstructions").text.indexOf("tick the files") >= 0)
+        mouseClick(control("restoreFile-0"))
+        compare(app.selectedRestoreIndexes, [0])
+        compare(control("restoreSelectionCount").text, "Selected files: 1")
+        compare(start.enabled, false)
+        destination.text = "   "
+        compare(start.enabled, false)
+        destination.text = " /safe/chosen restore "
+        compare(start.enabled, true)
+        const scroll = control("dashboardScrollView").contentItem
+        scroll.contentY = scroll.contentHeight - scroll.height
+        waitForRendering(app.contentItem)
+        mouseClick(start)
+        compare(restoreController.restoreCount, 1)
+        compare(restoreController.restoredIndexes, [0])
+        compare(restoreController.restoreDestination, "/safe/chosen restore")
+        const texts = visibleTexts(control("restorePanel"))
+        verify(texts.indexOf("Restore selected") < 0)
+        verify(texts.indexOf("Restore folder") < 0)
+        const startPosition = start.mapToItem(control("restorePanel"), 0, 0)
+        const destinationPosition = destination.mapToItem(control("restorePanel"), 0, destination.height)
+        verify(startPosition.y > destinationPosition.y)
+    }
+
+    function test_changingRestoreFilesClearsVisibleTicksAndSelection() {
+        showRestoreFiles()
+        mouseClick(control("restoreFile-0"))
+        compare(control("restoreFile-0").checked, true)
+        restoreController.entriesChanged()
+        compare(app.selectedRestoreIndexes, [])
+        compare(control("restoreFile-0").checked, false)
+        compare(control("startRestoreButton").enabled, false)
+    }
+
+    function test_restoreDestinationPickerUsesChosenFolder() {
+        showRestoreFiles()
+        const dialog = control("restoreDestinationDialog")
+        dialog.currentFolder = dashboardRestoreFolderUrl
+        dialog.open()
+        tryCompare(dialog, "visible", true)
+        dialog.selectedFolder = dashboardRestoreFolderUrl
+        dialog.accept()
+        compare(control("restoreDestinationField").text, dashboardRestoreFolderPath)
+        compare(control("startRestoreButton").enabled, false)
+        mouseClick(control("restoreFile-1"))
+        compare(app.selectedRestoreIndexes, [1])
+        compare(control("startRestoreButton").enabled, true)
     }
 
     function test_folderLinkUsesHistorySetAndRequiresActivity() {

@@ -149,11 +149,18 @@ QtObject {
         property string copySearch: ""
         property string defaultDestination: "/safe/restore"
         property string discoveredRoot: ""
+        property var restoredIndexes: []
+        property string restoreDestination: ""
+        property int restoreCount: 0
         signal statusChanged(string status)
         signal failed(string error)
         function discover(remoteRoot) { discoveredRoot = remoteRoot }
         function selectCopy(index) {}
-        function restoreSelected(indexes, destination) {}
+        function restoreSelected(indexes, destination) {
+            restoredIndexes = indexes.slice()
+            restoreDestination = destination
+            restoreCount++
+        }
         function restoreFolder(folder, destination) {}
     }
 }

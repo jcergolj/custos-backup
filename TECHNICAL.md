@@ -100,8 +100,9 @@ persisted so the next attempt resumes without expanding the deletion scope.
 ## Restore Safety
 
 Restores are limited to manifest entries that passed verification. Destination
-traversal and symbolic-link escapes are rejected. The default destination is a
-separate folder, and restore metadata is not added to the local backup queue.
+traversal and symbolic-link escapes are rejected. The UI requires users to tick
+files and specify a destination folder before enabling its single **Start
+restore** action. Restore metadata is not added to the local backup queue.
 
 ## Desktop Theme
 

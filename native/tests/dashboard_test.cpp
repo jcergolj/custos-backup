@@ -1,5 +1,6 @@
 #include <QGuiApplication>
 #include <QFile>
+#include <QDir>
 #include <QPalette>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -47,6 +48,12 @@ public slots:
         engine->rootContext()->setContextProperty(QStringLiteral("dashboardImportFileUrl"), QUrl::fromLocalFile(importPath));
         engine->rootContext()->setContextProperty(QStringLiteral("dashboardImportFilePath"), importPath);
         engine->rootContext()->setContextProperty(QStringLiteral("dashboardInvalidImportFileUrl"), QUrl::fromLocalFile(invalidPath));
+        const QString restorePath = home.filePath(QStringLiteral("restored files"));
+        if (!QDir().mkpath(restorePath)) {
+            qFatal("Cannot create restore destination test fixture.");
+        }
+        engine->rootContext()->setContextProperty(QStringLiteral("dashboardRestoreFolderUrl"), QUrl::fromLocalFile(restorePath));
+        engine->rootContext()->setContextProperty(QStringLiteral("dashboardRestoreFolderPath"), restorePath);
         QQmlComponent component(engine, QUrl::fromLocalFile(QStringLiteral(QUICK_TEST_SOURCE_DIR "/DashboardControllers.qml")));
         QObject *controllers = component.create();
         if (!controllers) {

@@ -133,6 +133,8 @@ ApplicationWindow {
         }
 
         backupSetController.currentIndex = setIndex
+        root.selectedRestoreIndexes = []
+        destinationField.text = ""
         showRestore = true
         restoreController.discover(backupSetController.currentRemoteRoot)
     }
@@ -434,6 +436,7 @@ ApplicationWindow {
             Layout.fillHeight: true
 
             ScrollView {
+                objectName: "dashboardScrollView"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 contentWidth: availableWidth
@@ -721,6 +724,7 @@ ApplicationWindow {
                     }
 
                     GroupBox {
+                        objectName: "restorePanel"
                         title: qsTr("Restore")
                         font.family: root.bodyFontFamily
                         font.pixelSize: root.sectionTitleSize
@@ -729,6 +733,7 @@ ApplicationWindow {
                         visible: root.showRestore
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(320, restoreContent.implicitHeight + 32)
+                        Layout.bottomMargin: root.contentPadding
 
                         ColumnLayout {
                             id: restoreContent
@@ -736,7 +741,8 @@ ApplicationWindow {
                             spacing: 16
 
                             Label {
-                                text: qsTr("Choose a remote copy, then select files or a folder to restore.")
+                                objectName: "restoreInstructions"
+                                text: qsTr("Choose a backup copy, tick the files you want to restore, and choose the folder to restore them to. Then press Start restore below.")
                                 font.pixelSize: root.bodyTypeSize
                                 lineHeight: root.bodyLeading
                                 lineHeightMode: Text.ProportionalHeight
@@ -781,7 +787,7 @@ ApplicationWindow {
                             }
 
                             Label {
-                                text: qsTr("Restore from a manifest")
+                                text: qsTr("1. Tick the files to restore")
                                 font.family: root.bodyFontFamily
                                 font.pixelSize: root.sectionTitleSize
                                 font.weight: Font.Bold
@@ -791,16 +797,19 @@ ApplicationWindow {
 
                             ListView {
                                 id: restoreList
+                                objectName: "restoreFilesList"
                                 model: restoreController.entries
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: Math.min(180, contentHeight)
+                                Layout.preferredHeight: count > 0 ? Math.max(48, Math.min(180, contentHeight)) : 0
                                 clip: true
                                 delegate: CheckBox {
                                     required property int index
                                     required property string modelData
+                                    objectName: "restoreFile-" + index
                                     text: modelData
                                     width: restoreList.width
-                                    onCheckedChanged: {
+                                    checked: root.selectedRestoreIndexes.indexOf(index) >= 0
+                                    onToggled: {
                                         let selected = root.selectedRestoreIndexes.slice()
                                         const position = selected.indexOf(index)
                                         if (checked && position < 0) {
@@ -813,37 +822,70 @@ ApplicationWindow {
                                 }
                             }
 
-                            RowLayout {
+                            Label {
+                                text: remoteCopySelector.currentIndex < 0
+                                    ? qsTr("Choose a backup copy to see the files available to restore.")
+                                    : qsTr("This copy has no verified files available to restore.")
+                                visible: restoreList.count === 0
+                                color: root.mutedColor
+                                wrapMode: Text.WordWrap
                                 Layout.fillWidth: true
+                            }
 
-                                TextField {
-                                    id: destinationField
-                                    text: restoreController.defaultDestination
-                                    placeholderText: qsTr("Restore destination folder")
-                                    Layout.fillWidth: true
-                                }
+                            Label {
+                                objectName: "restoreSelectionCount"
+                                text: qsTr("Selected files: %1").arg(root.selectedRestoreIndexes.length)
+                                color: root.mutedColor
+                                Layout.fillWidth: true
+                            }
 
-                                Button {
-                                    text: qsTr("Restore selected")
-                                    enabled: root.selectedRestoreIndexes.length > 0 && destinationField.text.length > 0
-                                    onClicked: restoreController.restoreSelected(root.selectedRestoreIndexes, destinationField.text)
-                                }
+                            Label {
+                                text: qsTr("2. Choose the destination folder")
+                                font.pixelSize: root.sectionTitleSize
+                                font.weight: Font.Bold
+                                color: root.accentColor
+                                Layout.fillWidth: true
                             }
 
                             RowLayout {
                                 Layout.fillWidth: true
 
                                 TextField {
-                                    id: folderField
-                                    placeholderText: qsTr("Optional folder path in selected copy")
+                                    id: destinationField
+                                    objectName: "restoreDestinationField"
+                                    placeholderText: qsTr("Choose a folder or enter its full path")
+                                    Accessible.name: qsTr("Restore destination folder")
                                     Layout.fillWidth: true
                                 }
 
                                 Button {
-                                    text: qsTr("Restore folder")
-                                    enabled: folderField.text.length > 0 && destinationField.text.length > 0
-                                    onClicked: restoreController.restoreFolder(folderField.text, destinationField.text)
+                                    objectName: "chooseRestoreDestinationButton"
+                                    text: qsTr("Choose folder…")
+                                    onClicked: restoreDestinationDialog.open()
                                 }
+                            }
+
+                            FolderDialog {
+                                id: restoreDestinationDialog
+                                objectName: "restoreDestinationDialog"
+                                title: qsTr("Choose where to restore the selected files")
+                                onAccepted: destinationField.text = root.localPath(selectedFolder)
+                            }
+
+                            Label {
+                                text: qsTr("The selected files will be restored into this folder, keeping their backed-up folder structure.")
+                                font.pixelSize: root.metadataTypeSize
+                                color: root.mutedColor
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                objectName: "startRestoreButton"
+                                text: qsTr("Start restore")
+                                Layout.alignment: Qt.AlignRight
+                                enabled: root.selectedRestoreIndexes.length > 0 && destinationField.text.trim().length > 0
+                                onClicked: restoreController.restoreSelected(root.selectedRestoreIndexes, destinationField.text.trim())
                             }
 
                         }
