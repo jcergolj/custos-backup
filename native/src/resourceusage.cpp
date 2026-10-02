@@ -28,7 +28,7 @@ ResourceUsage::ResourceUsage(QObject *parent)
 
 ResourceUsage::ResourceUsage(QString serviceDirectory, QString systemctl, QObject *parent)
     : QObject(parent)
-    , dropInPath(QDir(serviceDirectory).filePath(QStringLiteral("custos.service.d/50-custos-resources.conf")))
+    , dropInPath(QDir(serviceDirectory).filePath(QStringLiteral("omacustos.service.d/50-omacustos-resources.conf")))
     , systemctl(std::move(systemctl))
 {
     QFile file(dropInPath);
@@ -96,11 +96,11 @@ QByteArray ResourceUsage::contents(int index)
     if (index == -1) {
         // Explicitly clear the quota and reset scheduling when opting out, even
         // if a service from an older installation still contains low limits.
-        return QByteArray("# Managed by Custos Backup: system-defaults\n[Service]\n"
+        return QByteArray("# Managed by OmaCustos: system-defaults\n[Service]\n"
                           "CPUQuota=\nNice=0\nIOSchedulingClass=none\nIOSchedulingPriority=0\n");
     }
     const auto &preset = presets.at(index);
-    return QStringLiteral("# Managed by Custos Backup: %1\n[Service]\nCPUQuota=%2%\nNice=%3\n"
+    return QStringLiteral("# Managed by OmaCustos: %1\n[Service]\nCPUQuota=%2%\nNice=%3\n"
                           "IOSchedulingClass=%4\nIOSchedulingPriority=%5\n")
         .arg(QString::fromLatin1(preset.id)).arg(preset.cpuQuota).arg(preset.nice)
         .arg(preset.idleIo ? QStringLiteral("idle") : QStringLiteral("best-effort"))

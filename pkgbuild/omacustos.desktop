@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=Custos Backup
+Name=OmaCustos for Proton Drive
 GenericName=Backup and Restore
 Comment=Back up and restore selected files with Proton Drive
-Exec=custos
-TryExec=custos
-Icon=custos
+Exec=omacustos
+TryExec=omacustos
+Icon=omacustos
 Terminal=false
 Categories=Utility;Archiving;
-Keywords=backup;restore;proton;drive;
-StartupWMClass=custos
+Keywords=backup;restore;proton;drive;omarchy;
+StartupWMClass=omacustos

@@ -146,7 +146,7 @@ void BackupConfigTest::rejectsMalformedConfiguration()
     BackupConfig config;
     QString error;
     QVERIFY(!store.load(&config, &error));
-    QCOMPARE(error, QStringLiteral("The Custos backup configuration is malformed."));
+    QCOMPARE(error, QStringLiteral("The OmaCustos backup configuration is malformed."));
 }
 
 void BackupConfigTest::rejectsIncompleteConfiguration()
@@ -159,7 +159,7 @@ void BackupConfigTest::rejectsIncompleteConfiguration()
     QString error;
 
     QVERIFY(!store.save(config, &error));
-    QCOMPARE(error, QStringLiteral("The Custos backup configuration is incomplete."));
+    QCOMPARE(error, QStringLiteral("The OmaCustos backup configuration is incomplete."));
 }
 
 void BackupConfigTest::rejectsDuplicateSetIdsAndInvalidSchedules()
@@ -175,12 +175,12 @@ void BackupConfigTest::rejectsDuplicateSetIdsAndInvalidSchedules()
     };
     QString error;
     QVERIFY(!store.save(config, &error));
-    QCOMPARE(error, QStringLiteral("The Custos backup configuration is incomplete."));
+    QCOMPARE(error, QStringLiteral("The OmaCustos backup configuration is incomplete."));
 
     config.sets.removeLast();
     config.sets.first().schedule.frequency = QStringLiteral("hourly");
     QVERIFY(!store.save(config, &error));
-    QCOMPARE(error, QStringLiteral("The Custos backup configuration is incomplete."));
+    QCOMPARE(error, QStringLiteral("The OmaCustos backup configuration is incomplete."));
 }
 
 void BackupConfigTest::rejectsNullOutput()
@@ -191,7 +191,7 @@ void BackupConfigTest::rejectsNullOutput()
     QString error;
 
     QVERIFY(!store.load(nullptr, &error));
-    QCOMPARE(error, QStringLiteral("A destination for Custos backup configuration is required."));
+    QCOMPARE(error, QStringLiteral("A destination for OmaCustos backup configuration is required."));
 }
 
 QTEST_MAIN(BackupConfigTest)

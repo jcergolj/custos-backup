@@ -29,23 +29,23 @@ void ServiceInstallerTest::writesUserServiceWithSystemResourceDefaults()
     QString error;
     QVERIFY(installer.install(workerPath, &servicePath, &error));
     QVERIFY2(QFileInfo::exists(servicePath), qPrintable(error));
-    QVERIFY(QFileInfo::exists(directory.filePath(QStringLiteral("systemd/custos.timer"))));
+    QVERIFY(QFileInfo::exists(directory.filePath(QStringLiteral("systemd/omacustos.timer"))));
 
     QFile service(servicePath);
     QVERIFY(service.open(QIODevice::ReadOnly));
     const QString contents = QString::fromUtf8(service.readAll());
     QVERIFY(contents.contains(QStringLiteral("ExecStart=").append(workerPath)));
-    QVERIFY(contents.contains(QStringLiteral("--config %h/.config/custos/custos-backup.json")));
+    QVERIFY(contents.contains(QStringLiteral("--config %h/.config/omacustos/omacustos-backup.json")));
     QVERIFY(!contents.contains(QStringLiteral("Nice=")));
     QVERIFY(!contents.contains(QStringLiteral("CPUQuota=")));
     QVERIFY(!contents.contains(QStringLiteral("IOSchedulingClass=")));
     QVERIFY(contents.contains(QStringLiteral("NoNewPrivileges=true")));
 
-    QFile timer(directory.filePath(QStringLiteral("systemd/custos.timer")));
+    QFile timer(directory.filePath(QStringLiteral("systemd/omacustos.timer")));
     QVERIFY(timer.open(QIODevice::ReadOnly));
     const QString timerContents = QString::fromUtf8(timer.readAll());
     QVERIFY(timerContents.contains(QStringLiteral("Persistent=true")));
-    QVERIFY(timerContents.contains(QStringLiteral("Unit=custos.service")));
+    QVERIFY(timerContents.contains(QStringLiteral("Unit=omacustos.service")));
 }
 
 void ServiceInstallerTest::rejectsNonExecutableWorker()
@@ -57,7 +57,7 @@ void ServiceInstallerTest::rejectsNonExecutableWorker()
     QString error;
 
     QVERIFY(!installer.install(directory.filePath(QStringLiteral("missing-worker")), nullptr, &error));
-    QCOMPARE(error, QStringLiteral("The Custos worker must be an executable absolute path."));
+    QCOMPARE(error, QStringLiteral("The OmaCustos worker must be an executable absolute path."));
 }
 
 QTEST_MAIN(ServiceInstallerTest)

@@ -63,7 +63,7 @@ bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *e
 {
     if (config == nullptr) {
         if (error != nullptr) {
-            *error = QStringLiteral("A destination for Custos backup configuration is required.");
+            *error = QStringLiteral("A destination for OmaCustos backup configuration is required.");
         }
 
         return false;
@@ -72,7 +72,7 @@ bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *e
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         if (error != nullptr) {
-            *error = QStringLiteral("The Custos backup configuration could not be opened.");
+            *error = QStringLiteral("The OmaCustos backup configuration could not be opened.");
         }
 
         return false;
@@ -83,17 +83,17 @@ bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *e
     const QJsonObject object = document.object();
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The Custos backup configuration is malformed.");
+            *error = QStringLiteral("The OmaCustos backup configuration is malformed.");
         }
 
         return false;
     }
 
-    if (setsOnly && (object.value(QStringLiteral("application")).toString() != QStringLiteral("custos")
+    if (setsOnly && (object.value(QStringLiteral("application")).toString() != QStringLiteral("omacustos")
         || object.value(QStringLiteral("version")).toInt() != 1
         || !object.value(QStringLiteral("sets")).isArray())) {
         if (error != nullptr) {
-            *error = QStringLiteral("Choose a backup-set JSON file exported from Custos.");
+            *error = QStringLiteral("Choose a backup-set JSON file exported from OmaCustos.");
         }
         return false;
     }
@@ -105,7 +105,7 @@ bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *e
         const QJsonValue setsValue = object.value(QStringLiteral("sets"));
         if (!setsValue.isArray() || config->protonBinary.isEmpty()) {
             if (error != nullptr) {
-                *error = QStringLiteral("The Custos backup configuration is malformed.");
+                *error = QStringLiteral("The OmaCustos backup configuration is malformed.");
             }
 
             return false;
@@ -115,7 +115,7 @@ bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *e
         for (const QJsonValue &setValue : setsValue.toArray()) {
             if (!setValue.isObject()) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("The Custos backup configuration contains an invalid backup.");
+                    *error = QStringLiteral("The OmaCustos backup configuration contains an invalid backup.");
                 }
 
                 return false;
@@ -154,7 +154,7 @@ bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *e
                     return source.trimmed().isEmpty();
                 })) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("The Custos backup configuration is incomplete.");
+                    *error = QStringLiteral("The OmaCustos backup configuration is incomplete.");
                 }
 
                 return false;
@@ -176,7 +176,7 @@ bool BackupConfigStore::loadFile(BackupConfig *config, bool setsOnly, QString *e
     const QString remote = object.value(QStringLiteral("remote_root")).toString();
     if (source.isEmpty() || remote.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The Custos backup configuration is incomplete.");
+            *error = QStringLiteral("The OmaCustos backup configuration is incomplete.");
         }
 
         return false;
@@ -211,7 +211,7 @@ bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QStr
 {
     if (!setsOnly && config.protonBinary.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The Custos backup configuration is incomplete.");
+            *error = QStringLiteral("The OmaCustos backup configuration is incomplete.");
         }
 
         return false;
@@ -219,7 +219,7 @@ bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QStr
 
     QJsonObject object;
     if (setsOnly) {
-        object.insert(QStringLiteral("application"), QStringLiteral("custos"));
+        object.insert(QStringLiteral("application"), QStringLiteral("omacustos"));
         object.insert(QStringLiteral("version"), 1);
     } else {
         object.insert(QStringLiteral("proton_binary"), config.protonBinary);
@@ -232,7 +232,7 @@ bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QStr
             if (set.id.trimmed().isEmpty() || set.name.trimmed().isEmpty() || set.remoteRoot.trimmed().isEmpty()
                 || set.sourceDirectories.isEmpty() || !validSchedule(set.schedule) || setIds.contains(set.id)) {
                 if (error != nullptr) {
-                    *error = QStringLiteral("The Custos backup configuration is incomplete.");
+                    *error = QStringLiteral("The OmaCustos backup configuration is incomplete.");
                 }
 
                 return false;
@@ -243,7 +243,7 @@ bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QStr
             for (const QString &source : set.sourceDirectories) {
                 if (source.trimmed().isEmpty()) {
                     if (error != nullptr) {
-                        *error = QStringLiteral("The Custos backup configuration is incomplete.");
+                        *error = QStringLiteral("The OmaCustos backup configuration is incomplete.");
                     }
 
                     return false;
@@ -285,7 +285,7 @@ bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QStr
 
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to create the Custos configuration directory.");
+            *error = QStringLiteral("Unable to create the OmaCustos configuration directory.");
         }
 
         return false;
@@ -294,7 +294,7 @@ bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QStr
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to write the Custos backup configuration.");
+            *error = QStringLiteral("Unable to write the OmaCustos backup configuration.");
         }
 
         return false;
@@ -304,7 +304,7 @@ bool BackupConfigStore::saveFile(const BackupConfig &config, bool setsOnly, QStr
 
     if (file.write(contents) != contents.size() || !file.commit()) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to finish writing the Custos backup configuration.");
+            *error = QStringLiteral("Unable to finish writing the OmaCustos backup configuration.");
         }
 
         return false;

@@ -213,7 +213,7 @@ void BackupManifestTest::rejectsCompleteCopyWithMissingExpectedEntry()
     const QString path = directory.filePath(QStringLiteral("manifest.json"));
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
-    file.write(R"({"version":2,"application":"custos","computer":"computer","set_id":"set","set_name":"Set","copy_id":"copy","created_at":"2026-09-28T12:00:00.000Z","status":"complete","expected":["file.txt"],"failed":[],"entries":[]})");
+    file.write(R"({"version":2,"application":"omacustos","computer":"computer","set_id":"set","set_name":"Set","copy_id":"copy","created_at":"2026-09-28T12:00:00.000Z","status":"complete","expected":["file.txt"],"failed":[],"entries":[]})");
     file.close();
 
     QVector<BackupEntry> entries;

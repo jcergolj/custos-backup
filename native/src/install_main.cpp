@@ -11,7 +11,7 @@ int main(int argc, char *argv[])
     QCoreApplication application(argc, argv);
     const QString workerPath = application.arguments().value(1);
     if (workerPath.isEmpty()) {
-        qCritical() << "Usage: custos-install <worker-path>";
+        qCritical() << "Usage: omacustos-install <worker-path>";
 
         return 2;
     }
@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
 
     QProcessRunner runner(QStringLiteral("systemctl"));
     SystemdLauncher systemd(runner);
-    if (!systemd.enableUserTimer(QStringLiteral("custos.timer"), &error)) {
+    if (!systemd.enableUserTimer(QStringLiteral("omacustos.timer"), &error)) {
         qCritical().noquote() << error;
 
         return 1;

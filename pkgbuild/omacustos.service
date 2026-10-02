@@ -1,0 +1,7 @@
+[Unit]
+Description=OmaCustos backup worker
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omacustos-worker --config %h/.config/omacustos/omacustos-backup.json
+NoNewPrivileges=true

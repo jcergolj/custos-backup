@@ -24,7 +24,7 @@ QStringList BackupRestoreController::entries() const
 
 QString BackupRestoreController::defaultDestination() const
 {
-    return QDir::home().filePath(QStringLiteral("Custos restore"));
+    return QDir::home().filePath(QStringLiteral("OmaCustos restore"));
 }
 
 QStringList BackupRestoreController::copies() const

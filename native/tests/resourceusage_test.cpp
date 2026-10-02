@@ -27,7 +27,7 @@ private slots:
         resources.save(-1);
         QVERIFY(!resources.busy());
         QVERIFY(errors.isEmpty());
-        QVERIFY(!QFile::exists(home.filePath("custos.service.d/50-custos-resources.conf")));
+        QVERIFY(!QFile::exists(home.filePath("omacustos.service.d/50-omacustos-resources.conf")));
     }
 
     void returningToSystemDefaultsRemovesLimitsAndPersistsTheChoice()
@@ -43,7 +43,7 @@ private slots:
         resources.save(-1);
         QTRY_VERIFY(!resources.busy());
         QCOMPARE(resources.presetIndex(), -1);
-        QFile dropIn(home.filePath("custos.service.d/50-custos-resources.conf"));
+        QFile dropIn(home.filePath("omacustos.service.d/50-omacustos-resources.conf"));
         QVERIFY(dropIn.open(QIODevice::ReadOnly));
         const QByteArray contents = dropIn.readAll();
         QVERIFY(contents.contains("CPUQuota=\n"));
@@ -88,7 +88,7 @@ private slots:
         QTRY_VERIFY(!resources.busy());
         QVERIFY(errors.isEmpty());
         QCOMPARE(resources.presetIndex(), index);
-        QFile dropIn(home.filePath("custos.service.d/50-custos-resources.conf"));
+        QFile dropIn(home.filePath("omacustos.service.d/50-omacustos-resources.conf"));
         QVERIFY(dropIn.open(QIODevice::ReadOnly));
         const QByteArray contents = dropIn.readAll();
         QVERIFY(contents.contains("CPUQuota=" + QByteArray::number(quota) + "%\n"));
@@ -121,7 +121,7 @@ private slots:
         QTemporaryDir home;
         QVERIFY(home.isValid());
         const QString systemctl = home.filePath("systemctl");
-        const QString dropInPath = home.filePath("custos.service.d/50-custos-resources.conf");
+        const QString dropInPath = home.filePath("omacustos.service.d/50-omacustos-resources.conf");
         QByteArray previous;
         if (existing) {
             QVERIFY(script(systemctl, "#!/bin/sh\nexit 0\n"));
@@ -160,7 +160,7 @@ private slots:
         resources.save(5);
         QCOMPARE(errors.count(), 2);
         QCOMPARE(resources.presetIndex(), -1);
-        QVERIFY(!QFile::exists(home.filePath("custos.service.d/50-custos-resources.conf")));
+        QVERIFY(!QFile::exists(home.filePath("omacustos.service.d/50-omacustos-resources.conf")));
     }
 };
 

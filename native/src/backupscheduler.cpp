@@ -54,9 +54,9 @@ QString BackupScheduler::error() const
 {
     if (!lastError.isEmpty()) {
         if (lastError.contains(QStringLiteral("masked"), Qt::CaseInsensitive)) {
-            return tr("%1\nRun systemctl --user unmask custos.timer, then enable scheduling again.").arg(lastError);
+            return tr("%1\nRun systemctl --user unmask omacustos.timer, then enable scheduling again.").arg(lastError);
         }
-        return tr("%1\nCheck systemctl --user status custos.timer and journalctl --user -u custos.service for details.").arg(lastError);
+        return tr("%1\nCheck systemctl --user status omacustos.timer and journalctl --user -u omacustos.service for details.").arg(lastError);
     }
     if (!checked || !scheduled || ready()) {
         return {};
@@ -160,9 +160,9 @@ void BackupScheduler::start(Phase nextPhase)
     if (phase == Phase::Reload) {
         arguments.append(QStringLiteral("daemon-reload"));
     } else if (phase == Phase::Enable) {
-        arguments.append({QStringLiteral("enable"), QStringLiteral("--now"), QStringLiteral("custos.timer")});
+        arguments.append({QStringLiteral("enable"), QStringLiteral("--now"), QStringLiteral("omacustos.timer")});
     } else {
-        arguments.append({QStringLiteral("show"), QStringLiteral("custos.timer"),
+        arguments.append({QStringLiteral("show"), QStringLiteral("omacustos.timer"),
             QStringLiteral("--property=LoadState"), QStringLiteral("--property=ActiveState"),
             QStringLiteral("--property=UnitFileState")});
     }
@@ -209,7 +209,7 @@ void BackupScheduler::completed(bool success, const QString &output, const QStri
     lastError.clear();
     if (properties.value(QStringLiteral("LoadState")) != QStringLiteral("loaded")
         || !properties.contains(QStringLiteral("ActiveState")) || !properties.contains(QStringLiteral("UnitFileState"))) {
-        lastError = tr("The custos.timer unit is unavailable. Check your Custos installation.");
+        lastError = tr("The omacustos.timer unit is unavailable. Check your OmaCustos installation.");
     } else if (phase == Phase::Verify && !ready()) {
         lastError = tr("The backup timer is not enabled and active. Try enabling scheduling again.");
     }

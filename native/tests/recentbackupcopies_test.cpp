@@ -36,7 +36,7 @@ struct CopyFixture {
     CopyProvider provider {remote.path()};
     BackupSet set {QStringLiteral("documents-id"), QStringLiteral("Documents"), QStringLiteral("backups"), {source.path()}, {}};
     QString configPath = state.filePath(QStringLiteral("settings.json"));
-    QString runPath = state.filePath(QStringLiteral("custos-backup-runs.json"));
+    QString runPath = state.filePath(QStringLiteral("omacustos-backup-runs.json"));
     QDateTime date {QDate(2026, 10, 2), QTime(9, 30)};
 
     bool prepare()
@@ -80,7 +80,7 @@ void RecentBackupCopiesTest::confirmationDeletesOnlyItsExactCopyAndKeepsTheSet()
     QVERIFY(fixture.prepare());
     QVERIFY(fixture.copy(QStringLiteral("old"), -1));
     QVERIFY(fixture.copy(QStringLiteral("recent"), 0));
-    CleanupStore cleanup(fixture.state.filePath(QStringLiteral("custos-backup-cleanup.json")));
+    CleanupStore cleanup(fixture.state.filePath(QStringLiteral("omacustos-backup-cleanup.json")));
     cleanup.setPending(fixture.set.id, {fixture.path(QStringLiteral("old")), fixture.path(QStringLiteral("recent"))});
     QVERIFY(cleanup.save());
     RecentBackupCopies copies(fixture.provider, fixture.configPath, QStringLiteral("computer"));

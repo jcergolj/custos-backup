@@ -10,7 +10,7 @@ ApplicationWindow {
     height: 640
     minimumWidth: 760
     minimumHeight: 480
-    title: qsTr("Custos Backup")
+    title: qsTr("OmaCustos")
     property var selectedRestoreIndexes: []
     property bool syncingCurrentSet: false
     property bool showEditor: false
@@ -208,7 +208,7 @@ ApplicationWindow {
         objectName: "importSetsDialog"
         title: qsTr("Import backup sets (replace current list)")
         fileMode: FileDialog.OpenFile
-        nameFilters: [qsTr("Custos backup sets (*.json)")]
+        nameFilters: [qsTr("OmaCustos backup sets (*.json)")]
         onAccepted: {
             if (backupSetController.importSets(root.localPath(selectedFile))) {
                 root.showEditor = false
@@ -223,7 +223,7 @@ ApplicationWindow {
         title: qsTr("Export backup sets")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
-        nameFilters: [qsTr("Custos backup sets (*.json)")]
+        nameFilters: [qsTr("OmaCustos backup sets (*.json)")]
         onAccepted: backupSetController.exportSets(root.localPath(selectedFile))
     }
 
@@ -279,7 +279,7 @@ ApplicationWindow {
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         contentItem: Label {
-            text: qsTr("Delete the \"%1\" backup set from Custos? Its configuration and schedule will be removed. Copies already stored in Proton Drive will remain.").arg(removeSetDialog.setName)
+            text: qsTr("Delete the \"%1\" backup set from OmaCustos? Its configuration and schedule will be removed. Copies already stored in Proton Drive will remain.").arg(removeSetDialog.setName)
             font.pixelSize: root.bodyTypeSize
             lineHeight: root.bodyLeading
             lineHeightMode: Text.ProportionalHeight
@@ -339,7 +339,7 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: qsTr("Custos Backup")
+                text: qsTr("OmaCustos")
                 font.family: root.displayFontFamily
                 font.pixelSize: root.displayTypeSize
                 font.weight: Font.Bold

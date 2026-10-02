@@ -53,7 +53,7 @@ int main(int argc, char *argv[])
     parser.process(application);
 
     const QString configuredPath = parser.value(QStringLiteral("config")).isEmpty()
-        ? QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"))
+        ? QDir::home().filePath(QStringLiteral(".config/omacustos/omacustos-backup.json"))
         : parser.value(QStringLiteral("config"));
     const QString configPath = QFileInfo(configuredPath).absoluteFilePath();
     QLockFile processLock(configPath + QStringLiteral(".worker.lock"));
@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
         return 0;
     }
     const QString stateDirectory = QFileInfo(configPath).absolutePath();
-    QLockFile runStateLock(QDir(stateDirectory).filePath(QStringLiteral("custos-backup-runs.json.lock")));
+    QLockFile runStateLock(QDir(stateDirectory).filePath(QStringLiteral("omacustos-backup-runs.json.lock")));
     if (!runStateLock.tryLock(0)) {
         return 0;
     }
@@ -77,13 +77,13 @@ int main(int argc, char *argv[])
     QProcessRunner runner(config.protonBinary);
     ProtonProvider provider(runner);
     BackupEngine engine;
-    const QString cleanupPath = QDir(stateDirectory).filePath(QStringLiteral("custos-backup-cleanup.json"));
+    const QString cleanupPath = QDir(stateDirectory).filePath(QStringLiteral("omacustos-backup-cleanup.json"));
     CleanupStore cleanupStore(cleanupPath);
     if (!cleanupStore.load(&error)) {
         qCritical().noquote() << error;
         return 1;
     }
-    BackupRunStore runStore(QDir(stateDirectory).filePath(QStringLiteral("custos-backup-runs.json")));
+    BackupRunStore runStore(QDir(stateDirectory).filePath(QStringLiteral("omacustos-backup-runs.json")));
     if (!runStore.load(&error)) {
         qCritical().noquote() << error;
 

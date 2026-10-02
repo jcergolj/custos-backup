@@ -39,7 +39,7 @@ void BackupSetControllerTest::remainingTimeIsReportedForTheRunningSetOnly()
     config.sets = {{"documents", "Documents", "/my-files/backups", {"/safe/documents"}, {}},
                    {"photos", "Photos", "/my-files/backups", {"/safe/photos"}, {}}};
     QVERIFY(BackupConfigStore(configPath).save(config));
-    BackupRunStore runs(home.filePath("custos-backup-runs.json"));
+    BackupRunStore runs(home.filePath("omacustos-backup-runs.json"));
     runs.ensureSet("documents");
     auto &record = *runs.find("documents");
     runs.markRunning(record);
@@ -130,7 +130,7 @@ void BackupSetControllerTest::recentBackupTimestampIncludesLocalDateAndSeconds()
     config.sets = {{QStringLiteral("documents-id"), QStringLiteral("Documents"),
         QStringLiteral("/my-files/backups"), {QStringLiteral("/safe/documents")}, {}}};
     QVERIFY(BackupConfigStore(configPath).save(config));
-    BackupRunStore runs(directory.filePath(QStringLiteral("custos-backup-runs.json")));
+    BackupRunStore runs(directory.filePath(QStringLiteral("omacustos-backup-runs.json")));
     runs.ensureSet(QStringLiteral("documents-id"));
     runs.markSuccess(*runs.find(QStringLiteral("documents-id")), QDateTime(QDate(2026, 10, 2), QTime(9, 30, 45)));
     QVERIFY(runs.save());
@@ -169,7 +169,7 @@ void BackupSetControllerTest::deletedCopyDisappearsFromRecentBackupsButKeepsItsS
     config.sets = {{QStringLiteral("documents-id"), QStringLiteral("Documents"),
         QStringLiteral("/my-files/backups"), {QStringLiteral("/safe/documents")}, {}}};
     QVERIFY(BackupConfigStore(configPath).save(config));
-    BackupRunStore runs(directory.filePath(QStringLiteral("custos-backup-runs.json")));
+    BackupRunStore runs(directory.filePath(QStringLiteral("omacustos-backup-runs.json")));
     runs.ensureSet(QStringLiteral("documents-id"));
     runs.find(QStringLiteral("documents-id"))->status = QStringLiteral("copy_deleted");
     QVERIFY(runs.save());
@@ -205,7 +205,7 @@ void BackupSetControllerTest::exportsSavedSetsAndImportsTheirSettings()
     QFile exported(exportPath);
     QVERIFY(exported.open(QIODevice::ReadOnly));
     const QJsonObject document = QJsonDocument::fromJson(exported.readAll()).object();
-    QCOMPARE(document.value(QStringLiteral("application")).toString(), QStringLiteral("custos"));
+    QCOMPARE(document.value(QStringLiteral("application")).toString(), QStringLiteral("omacustos"));
     QVERIFY(!document.contains(QStringLiteral("proton_binary")));
     QVERIFY(!document.contains(QStringLiteral("runs")));
 
@@ -241,9 +241,9 @@ void BackupSetControllerTest::invalidImportLeavesExistingSetsUntouched_data()
     QTest::addColumn<QByteArray>("contents");
     QTest::newRow("invalid JSON") << QByteArray("{");
     QTest::newRow("not an export") << QByteArray(R"({"sets":[]})");
-    QTest::newRow("unknown version") << QByteArray(R"({"application":"custos","version":2,"sets":[]})");
-    QTest::newRow("invalid sources") << QByteArray(R"({"application":"custos","version":1,"sets":[{"id":"a","name":"A","remote_root":"/my-files/backups","source_directories":[]}]})");
-    QTest::newRow("duplicate identities") << QByteArray(R"({"application":"custos","version":1,"sets":[{"id":"a","name":"A","remote_root":"/my-files/backups","source_directories":["/safe/a"]},{"id":"a","name":"B","remote_root":"/my-files/backups","source_directories":["/safe/b"]}]})");
+    QTest::newRow("unknown version") << QByteArray(R"({"application":"omacustos","version":2,"sets":[]})");
+    QTest::newRow("invalid sources") << QByteArray(R"({"application":"omacustos","version":1,"sets":[{"id":"a","name":"A","remote_root":"/my-files/backups","source_directories":[]}]})");
+    QTest::newRow("duplicate identities") << QByteArray(R"({"application":"omacustos","version":1,"sets":[{"id":"a","name":"A","remote_root":"/my-files/backups","source_directories":["/safe/a"]},{"id":"a","name":"B","remote_root":"/my-files/backups","source_directories":["/safe/b"]}]})");
 }
 
 void BackupSetControllerTest::invalidImportLeavesExistingSetsUntouched()
@@ -301,7 +301,7 @@ void BackupSetControllerTest::exportCannotOverwriteLocalState()
     BackupEngine engine;
     BackupSetController controller(engine, configPath);
     QVERIFY(!controller.exportSets(configPath));
-    QVERIFY(!controller.exportSets(directory.filePath(QStringLiteral("custos-backup-runs.json"))));
+    QVERIFY(!controller.exportSets(directory.filePath(QStringLiteral("omacustos-backup-runs.json"))));
     QVERIFY(!controller.exportSets(directory.path()));
     BackupConfig reloaded;
     QVERIFY(BackupConfigStore(configPath).load(&reloaded));

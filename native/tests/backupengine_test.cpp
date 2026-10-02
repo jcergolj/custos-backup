@@ -84,7 +84,7 @@ void BackupEngineTest::rejectsMissingSource()
     BackupEngine engine;
     QString error;
 
-    QVERIFY(!engine.validateSelection(QStringLiteral("/tmp/custos-does-not-exist"), &error));
+    QVERIFY(!engine.validateSelection(QStringLiteral("/tmp/omacustos-does-not-exist"), &error));
     QCOMPARE(error, QStringLiteral("The selected folder does not exist."));
 }
 

@@ -43,7 +43,7 @@ public slots:
             if (!file.open(QIODevice::WriteOnly)) {
                 qFatal("Cannot create import-dialog test fixture.");
             }
-            file.write(path == importPath ? R"({"application":"custos","version":1,"sets":[]})" : "{");
+            file.write(path == importPath ? R"({"application":"omacustos","version":1,"sets":[]})" : "{");
         }
         engine->rootContext()->setContextProperty(QStringLiteral("dashboardImportFileUrl"), QUrl::fromLocalFile(importPath));
         engine->rootContext()->setContextProperty(QStringLiteral("dashboardImportFilePath"), importPath);
@@ -63,7 +63,7 @@ public slots:
         for (const char *name : {"backupSetController", "backupLauncher", "restoreController", "protonFolderBrowser", "recentBackupCopies", "protonAuth", "themeColors", "resourceUsage", "backupScheduler"}) {
             engine->rootContext()->setContextProperty(QString::fromLatin1(name), controllers->property(name).value<QObject *>());
         }
-        engine->rootContext()->setContextProperty(QStringLiteral("dashboardScreenshotPath"), qEnvironmentVariable("CUSTOS_TEST_SCREENSHOT"));
+        engine->rootContext()->setContextProperty(QStringLiteral("dashboardScreenshotPath"), qEnvironmentVariable("OMACUSTOS_TEST_SCREENSHOT"));
     }
 
 private:

@@ -16,7 +16,7 @@ BackupLauncher::BackupLauncher(QObject *parent)
 
 void BackupLauncher::startBackup()
 {
-    const QString configPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"));
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/omacustos/omacustos-backup.json"));
     BackupConfig config;
     QString error;
     if (!BackupConfigStore(configPath).load(&config, &error)) {
@@ -25,7 +25,7 @@ void BackupLauncher::startBackup()
         return;
     }
 
-    const QString runPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup-runs.json"));
+    const QString runPath = QDir::home().filePath(QStringLiteral(".config/omacustos/omacustos-backup-runs.json"));
     QLockFile runStateLock(runPath + QStringLiteral(".lock"));
     if (!runStateLock.tryLock(0)) {
         emit failed(QStringLiteral("A backup queue update is already in progress."));
@@ -52,7 +52,7 @@ void BackupLauncher::startBackup()
 
 void BackupLauncher::startBackup(const QString &setId)
 {
-    const QString configPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"));
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/omacustos/omacustos-backup.json"));
     BackupConfig config;
     QString error;
     if (!BackupConfigStore(configPath).load(&config, &error)) {
@@ -66,7 +66,7 @@ void BackupLauncher::startBackup(const QString &setId)
         emit failed(QStringLiteral("The selected backup no longer exists."));
         return;
     }
-    const QString runPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup-runs.json"));
+    const QString runPath = QDir::home().filePath(QStringLiteral(".config/omacustos/omacustos-backup-runs.json"));
     QLockFile runStateLock(runPath + QStringLiteral(".lock"));
     if (!runStateLock.tryLock(0)) {
         emit failed(QStringLiteral("A backup queue update is already in progress."));
@@ -89,9 +89,9 @@ void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &
     BackupConfig config {
         sourceDirectory,
         remoteRoot,
-        qEnvironmentVariable("CUSTOS_PROTON_BIN", QStringLiteral("proton-drive")),
+        qEnvironmentVariable("OMACUSTOS_PROTON_BIN", QStringLiteral("proton-drive")),
     };
-    const QString configPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup.json"));
+    const QString configPath = QDir::home().filePath(QStringLiteral(".config/omacustos/omacustos-backup.json"));
     QString error;
     if (!BackupConfigStore(configPath).save(config, &error)) {
         emit failed(error);
@@ -99,7 +99,7 @@ void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &
         return;
     }
 
-    const QString runPath = QDir::home().filePath(QStringLiteral(".config/custos/custos-backup-runs.json"));
+    const QString runPath = QDir::home().filePath(QStringLiteral(".config/omacustos/omacustos-backup-runs.json"));
     QLockFile runStateLock(runPath + QStringLiteral(".lock"));
     if (!runStateLock.tryLock(0)) {
         emit failed(QStringLiteral("A backup queue update is already in progress."));
@@ -124,7 +124,7 @@ void BackupLauncher::startBackup(const QString &sourceDirectory, const QString &
 void BackupLauncher::startService()
 {
     QString error;
-    if (!systemd.startUserService(QStringLiteral("custos.service"), &error)) {
+    if (!systemd.startUserService(QStringLiteral("omacustos.service"), &error)) {
         emit failed(error);
 
         return;

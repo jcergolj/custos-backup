@@ -32,8 +32,8 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
     : QObject(parent)
     , engine(engine)
     , store(configPath)
-    , runStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("custos-backup-runs.json")))
-    , cleanupStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("custos-backup-cleanup.json")))
+    , runStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("omacustos-backup-runs.json")))
+    , cleanupStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("omacustos-backup-cleanup.json")))
 {
     connect(&stateTimer, &QTimer::timeout, this, &BackupSetController::refreshRunState);
     stateTimer.start(5000);
@@ -45,7 +45,7 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
     } else if (QFileInfo::exists(store.filePath())) {
         emit failed(error);
     } else {
-        config.protonBinary = qEnvironmentVariable("CUSTOS_PROTON_BIN", QStringLiteral("proton-drive"));
+        config.protonBinary = qEnvironmentVariable("OMACUSTOS_PROTON_BIN", QStringLiteral("proton-drive"));
         selectedIndex = -1;
     }
 }

@@ -34,11 +34,11 @@ RecentCopyTarget inspectCopy(BackupProvider &provider, const BackupSet &set, con
         target.error = error.isEmpty() ? QStringLiteral("Unable to identify the remote backup copy.") : error;
         return target;
     }
-    if (info.version != 2 || info.application != QStringLiteral("custos") || info.setId != set.id
+    if (info.version != 2 || info.application != QStringLiteral("omacustos") || info.setId != set.id
         || info.computerName != computer || info.copyId != QFileInfo(path).fileName()
         || !info.createdAt.isValid()
         || (info.status != QStringLiteral("complete") && info.status != QStringLiteral("incomplete"))) {
-        target.error = QStringLiteral("The remote folder is not the expected Custos backup copy.");
+        target.error = QStringLiteral("The remote folder is not the expected OmaCustos backup copy.");
         return target;
     }
     target.copyId = info.copyId;
@@ -56,7 +56,7 @@ RecentCopyTarget resolveCopy(BackupProvider &provider, const QString &configPath
         result.error = QStringLiteral("Wait for the running backup to finish before managing its copies.");
         return result;
     }
-    const QString runPath = QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("custos-backup-runs.json"));
+    const QString runPath = QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("omacustos-backup-runs.json"));
     QLockFile runLock(runPath + QStringLiteral(".lock"));
     if (!runLock.tryLock(0)) {
         result.error = QStringLiteral("A backup queue update is already in progress.");
@@ -98,7 +98,7 @@ RecentCopyTarget resolveCopy(BackupProvider &provider, const QString &configPath
             result.error = QStringLiteral("The remote backup copy changed since confirmation.");
             return result;
         }
-        CleanupStore cleanup(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("custos-backup-cleanup.json")));
+        CleanupStore cleanup(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("omacustos-backup-cleanup.json")));
         if (!cleanup.load(&result.error)) {
             return result;
         }
@@ -141,7 +141,7 @@ RecentCopyTarget resolveCopy(BackupProvider &provider, const QString &configPath
         }
     }
     if (!result.createdAt.isValid()) {
-        result.error = QStringLiteral("No identifiable Custos backup copy was found for this backup set.");
+        result.error = QStringLiteral("No identifiable OmaCustos backup copy was found for this backup set.");
         return result;
     }
     record->remoteCopyPath = result.path;

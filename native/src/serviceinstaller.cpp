@@ -15,7 +15,7 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
     const QFileInfo worker(workerPath);
     if (!worker.isAbsolute() || !worker.isFile() || !worker.isExecutable()) {
         if (error != nullptr) {
-            *error = QStringLiteral("The Custos worker must be an executable absolute path.");
+            *error = QStringLiteral("The OmaCustos worker must be an executable absolute path.");
         }
 
         return false;
@@ -37,7 +37,7 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
         return false;
     }
 
-    const QString path = QDir(serviceDirectory).filePath(QStringLiteral("custos.service"));
+    const QString path = QDir(serviceDirectory).filePath(QStringLiteral("omacustos.service"));
     QSaveFile service(path);
     if (!service.open(QIODevice::WriteOnly)) {
         if (error != nullptr) {
@@ -49,10 +49,10 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
 
     const QByteArray contents = QStringLiteral(
         "[Unit]\n"
-        "Description=Custos Backup worker\n\n"
+        "Description=OmaCustos backup worker\n\n"
         "[Service]\n"
         "Type=oneshot\n"
-        "ExecStart=%1 --config %2/.config/custos/custos-backup.json\n"
+        "ExecStart=%1 --config %2/.config/omacustos/omacustos-backup.json\n"
         "NoNewPrivileges=true\n"
     ).arg(workerPath, QStringLiteral("%h")).toUtf8();
 
@@ -64,28 +64,28 @@ bool ServiceInstaller::install(const QString &workerPath, QString *installedPath
         return false;
     }
 
-    const QString timerPath = QDir(serviceDirectory).filePath(QStringLiteral("custos.timer"));
+    const QString timerPath = QDir(serviceDirectory).filePath(QStringLiteral("omacustos.timer"));
     QSaveFile timer(timerPath);
     if (!timer.open(QIODevice::WriteOnly)) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to write the Custos systemd timer.");
+            *error = QStringLiteral("Unable to write the OmaCustos systemd timer.");
         }
 
         return false;
     }
     const QByteArray timerContents = QByteArray(
         "[Unit]\n"
-        "Description=Run Custos Backup scheduler\n\n"
+        "Description=Run OmaCustos backup scheduler\n\n"
         "[Timer]\n"
         "OnCalendar=*-*-* *:*:00\n"
         "Persistent=true\n"
-        "Unit=custos.service\n\n"
+        "Unit=omacustos.service\n\n"
         "[Install]\n"
         "WantedBy=timers.target\n"
     );
     if (timer.write(timerContents) != timerContents.size() || !timer.commit()) {
         if (error != nullptr) {
-            *error = QStringLiteral("Unable to finish writing the Custos systemd timer.");
+            *error = QStringLiteral("Unable to finish writing the OmaCustos systemd timer.");
         }
 
         return false;

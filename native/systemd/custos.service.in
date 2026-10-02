@@ -1,7 +1,0 @@
-[Unit]
-Description=Custos Backup worker
-
-[Service]
-Type=oneshot
-ExecStart=@INSTALL_PREFIX@/bin/custos-worker --config %h/.config/custos/custos-backup.json
-NoNewPrivileges=true

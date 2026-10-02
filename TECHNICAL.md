@@ -5,12 +5,12 @@ and advanced users but are not needed for the quick start.
 
 ## Local State
 
-Custos stores user state under `~/.config/custos`:
+OmaCustos stores user state under `~/.config/omacustos`:
 
 ```text
-custos-backup.json
-custos-backup-runs.json
-custos-backup-cleanup.json
+omacustos-backup.json
+omacustos-backup-runs.json
+omacustos-backup-cleanup.json
 ```
 
 The first file contains named backup configurations. Run history and pending
@@ -39,7 +39,7 @@ configurations, run history, cleanup decisions, and remote manifests.
 Legacy `required_volumes` settings are ignored on load and omitted on save;
 backups no longer wait for external drives to be mounted.
 
-Backup-set exports use a version-1 JSON document with `application: "custos"`
+Backup-set exports use a version-1 JSON document with `application: "omacustos"`
 and a `sets` array. They contain the saved set definitions, without the CLI
 executable, run history, cleanup decisions, files, or credentials. Import validates
 the whole document before replacing the set list and preserves the local CLI
@@ -67,20 +67,20 @@ The Proton Drive provider uses the official CLI for:
 - discovery through `filesystem list`;
 - cleanup through per-item `trash` followed by `delete`.
 
-Custos never calls `empty-trash`. Remote content size is verified after upload and
+OmaCustos never calls `empty-trash`. Remote content size is verified after upload and
 download using `size` or `activeRevision.claimedSize`, not encrypted storage size.
 The manifest records the local SHA-256 checksum; a provider SHA-256
 field is used when the CLI exposes one.
 
 Recent-backup browser links open the copy recorded for that run in
-the signed-in Proton Drive web app. Custos resolves the folder's node ID and an
+the signed-in Proton Drive web app. OmaCustos resolves the folder's node ID and an
 ancestor's share ID through read-only CLI metadata requests in the background;
 it does not create public sharing links.
 
 Runs persist the exact copy folder as `remote_copy_path`. For older run records,
-Custos identifies the newest matching manifest inside that backup's folder and
+OmaCustos identifies the newest matching manifest inside that backup's folder and
 remembers its path. Browsing and manual deletion use the same recorded copy.
-Manual deletion requires confirmation of the exact path, rechecks its Custos
+Manual deletion requires confirmation of the exact path, rechecks its OmaCustos
 manifest and identity, and moves that copy to Proton Drive Trash. Older copies
 and the backup set remain; the deleted entry disappears from Recent backups.
 Worker and run-state locks prevent deletion during a backup or queue update.
@@ -107,7 +107,7 @@ cleanup show **Finalizing backup…** until the worker records its final result.
 
 ## Retention And Cleanup
 
-Retention considers only positively identified Custos copies for the
+Retention considers only positively identified OmaCustos copies for the
 correct computer and backup. Successful verified copies are retained according to
 the backup's limit. Failed or incomplete copies cannot cause an older successful
 copy to be removed.
@@ -141,8 +141,8 @@ disabled colors share these live palette roles.
 The package installs these user units:
 
 ```text
-/usr/lib/systemd/user/custos.service
-/usr/lib/systemd/user/custos.timer
+/usr/lib/systemd/user/omacustos.service
+/usr/lib/systemd/user/omacustos.timer
 ```
 
 By default, the worker and its Proton CLI subprocesses use normal system
@@ -157,7 +157,7 @@ nice 5), and very high (200%, nice 0). Very low and low use idle I/O scheduling;
 medium, high, and very high use best-effort I/O with priorities 7, 5, and 4.
 
 Saving a changed preset writes a managed drop-in at
-`$XDG_CONFIG_HOME/systemd/user/custos.service.d/50-custos-resources.conf`
+`$XDG_CONFIG_HOME/systemd/user/omacustos.service.d/50-omacustos-resources.conf`
 (default `~/.config/systemd/user/...`) and asynchronously runs
 `systemctl --user daemon-reload`. Reload failures restore the previous file and
 report an error. No root privileges are required. The drop-in is also the
@@ -175,7 +175,7 @@ permits up to two cores. Priorities never exceed normal (`nice=0`).
 The package installs the timer without enabling it. After a successful backup
 configuration save or import with any enabled schedule, the UI asynchronously
 runs `systemctl --user daemon-reload`, then
-`systemctl --user enable --now custos.timer`. Activation waits for any
+`systemctl --user enable --now omacustos.timer`. Activation waits for any
 resource-preset update to finish, so an immediately due backup starts with the
 saved limits. Invalid or failed saves,
 preview, and manual-only configurations do not enable the timer.
@@ -188,5 +188,9 @@ does not automatically resume an externally paused timer. Disabling a backup's
 schedule stops future scheduled runs for that set; the shared timer may remain
 active to process queued work and retries.
 
-The display name is **Custos Backup**. The technical package, executable, unit,
-and configuration names are `custos-git`, `custos`, and `custos.*`.
+The full project and desktop launcher name is **OmaCustos for Proton Drive**;
+the interface uses **OmaCustos**. The package is `omacustos-git`, the executables
+are `omacustos`, `omacustos-worker`, and `omacustos-install`, and the user units
+are `omacustos.service` and `omacustos.timer`. The QML module is `OmaCustos`.
+`OMACUSTOS_PROTON_BIN` overrides the default Proton CLI executable when creating
+a configuration; saved configurations retain their `proton_binary` setting.

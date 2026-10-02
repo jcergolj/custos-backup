@@ -32,10 +32,10 @@ void SystemdLauncherTest::startsOnlyTheRequestedUserService()
     runner.response.exitCode = 0;
     SystemdLauncher launcher(runner);
 
-    QVERIFY(launcher.startUserService(QStringLiteral("custos.service")));
+    QVERIFY(launcher.startUserService(QStringLiteral("omacustos.service")));
     const QStringList expected {
         QStringLiteral("--user"), QStringLiteral("--no-block"), QStringLiteral("start"),
-        QStringLiteral("custos.service"),
+        QStringLiteral("omacustos.service"),
     };
 
     QCOMPARE(runner.arguments, expected);
@@ -60,7 +60,7 @@ void SystemdLauncherTest::returnsSystemdErrors()
     SystemdLauncher launcher(runner);
     QString error;
 
-    QVERIFY(!launcher.startUserService(QStringLiteral("custos.service"), &error));
+    QVERIFY(!launcher.startUserService(QStringLiteral("omacustos.service"), &error));
     QCOMPARE(error, QStringLiteral("unit is masked"));
 }
 
@@ -78,13 +78,13 @@ void SystemdLauncherTest::enablesTimerAfterReloadingManager()
     } runner;
     SystemdLauncher launcher(runner);
 
-    QVERIFY(launcher.enableUserTimer(QStringLiteral("custos.timer")));
+    QVERIFY(launcher.enableUserTimer(QStringLiteral("omacustos.timer")));
     QCOMPARE(runner.calls.size(), 2);
     const QStringList reloadArguments {QStringLiteral("--user"), QStringLiteral("daemon-reload")};
     QCOMPARE(runner.calls.at(0), reloadArguments);
     const QStringList enableArguments {
         QStringLiteral("--user"), QStringLiteral("enable"), QStringLiteral("--now"),
-        QStringLiteral("custos.timer"),
+        QStringLiteral("omacustos.timer"),
     };
     QCOMPARE(runner.calls.at(1), enableArguments);
 }

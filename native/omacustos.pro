@@ -32,10 +32,10 @@ HEADERS += \
 
 RESOURCES += qml.qrc
 
-TARGET = custos
+TARGET = omacustos
 
 worker {
-    TARGET = custos-worker
+    TARGET = omacustos-worker
     SOURCES = \
         src/worker_main.cpp \
         src/backupconfig.cpp \
@@ -52,7 +52,7 @@ worker {
 }
 
 installer {
-    TARGET = custos-install
+    TARGET = omacustos-install
     SOURCES = \
         src/install_main.cpp \
         src/serviceinstaller.cpp

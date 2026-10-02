@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtTest
-import "../qml" as Custos
+import "../qml" as OmaCustos
 
 TestCase {
     id: testCase
@@ -10,7 +10,7 @@ TestCase {
     when: windowShown
     property var app
 
-    Component { id: windowComponent; Custos.Main {} }
+    Component { id: windowComponent; OmaCustos.Main {} }
 
     function init() {
         backupScheduler.busy = false
@@ -717,11 +717,11 @@ TestCase {
         backupScheduler.busy = true
         compare(control("enableSchedulingButton").enabled, false)
         backupScheduler.busy = false
-        backupScheduler.error = "Unit custos.timer is masked"
+        backupScheduler.error = "Unit omacustos.timer is masked"
         backupScheduler.status = "Scheduling needs attention"
         const error = control("schedulingErrorLabel")
         compare(error.visible, true)
-        compare(error.text, "Unit custos.timer is masked")
+        compare(error.text, "Unit omacustos.timer is masked")
         backupScheduler.failed("Could not activate scheduling")
         compare(control("notificationMessageLabel").text, "Could not activate scheduling")
         backupScheduler.hasSchedules = false

@@ -389,7 +389,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         reportProgress(progress);
     }
     const QString manifestDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath(
-        QStringLiteral("custos-manifest-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QStringLiteral("omacustos-manifest-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!QDir().mkpath(manifestDirectory)
         || !QFile::setPermissions(manifestDirectory, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)) {
         if (error != nullptr) {
@@ -409,7 +409,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         {QStringLiteral("entries"), entries},
     };
     if (!metadata.copyId.isEmpty()) {
-        manifestObject.insert(QStringLiteral("application"), QStringLiteral("custos"));
+        manifestObject.insert(QStringLiteral("application"), QStringLiteral("omacustos"));
         manifestObject.insert(QStringLiteral("computer"), metadata.computerName);
         manifestObject.insert(QStringLiteral("set_id"), metadata.setId);
         manifestObject.insert(QStringLiteral("set_name"), metadata.setName);
@@ -521,7 +521,7 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         return false;
     }
 
-    const QString temporaryDestination = QStringLiteral("%1.custos-restore-%2")
+    const QString temporaryDestination = QStringLiteral("%1.omacustos-restore-%2")
         .arg(destination, QUuid::createUuid().toString(QUuid::WithoutBraces));
     if (!provider.download(entry.remotePath, temporaryDestination, error)) {
         QFile::remove(temporaryDestination);

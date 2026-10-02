@@ -1,10 +1,10 @@
 [Unit]
-Description=Run Custos Backup scheduler
+Description=Run OmaCustos backup scheduler
 
 [Timer]
 OnCalendar=*-*-* *:*:00
 Persistent=true
-Unit=custos.service
+Unit=omacustos.service
 
 [Install]
 WantedBy=timers.target

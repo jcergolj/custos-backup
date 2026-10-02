@@ -1,6 +1,6 @@
-# Custos Backup
+# OmaCustos for Proton Drive
 
-Custos Backup is a small Omarchy desktop app for backing up selected files and
+OmaCustos is a small Omarchy desktop app for backing up selected files and
 folders to Proton Drive. It runs as your user and uses Proton's official
 `proton-drive` CLI. It is intended for personal files and folders, not system
 images, boot files, filesystem snapshots, or consistent live-database backups.
@@ -9,31 +9,33 @@ Create a named backup set for documents, photos, projects, or personal
 configuration folders, then run it manually or on a schedule. Each run creates
 a separate copy you can restore later.
 
+“Custos” is Latin for guardian or keeper.
+
 ## Get started
 
-### 1. Install Custos
+### 1. Install OmaCustos
 
 On Arch Linux or Omarchy, build and install the package:
 
 ```bash
 sudo pacman -S --needed base-devel git
-git clone https://github.com/jcergolj/custos-backup.git
-cd custos-backup/pkgbuild
+git clone https://github.com/jcergolj/omacustos.git
+cd omacustos/pkgbuild
 makepkg -Csi
 ```
 
-Open **Custos Backup** from your app launcher, or run `custos`.
+Open **OmaCustos for Proton Drive** from your app launcher, or run `omacustos`.
 
 ### 2. Authenticate Proton Drive
 
 Install the `proton-drive` CLI using the package or release source supported by
-your system. Authenticate it as the same user who will run Custos.
+your system. Authenticate it as the same user who will run OmaCustos.
 
-When Custos cannot connect to Proton Drive, it shows a visible error with a
+When OmaCustos cannot connect to Proton Drive, it shows a visible error with a
 suggested fix. If the CLI is missing, install `proton-drive` and press **Retry**.
 If you need to authenticate, press **Sign in to Proton** to open the CLI login
 in your terminal, which launches your browser. Keep the terminal open until
-authentication completes. Custos checks the connection again automatically;
+authentication completes. OmaCustos checks the connection again automatically;
 use **Retry** to check immediately. No connection status is shown when healthy.
 
 You can also sign in from a terminal:
@@ -44,13 +46,13 @@ proton-drive auth login
 proton-drive filesystem info /my-files
 ```
 
-Custos uses this login session. It never asks for or stores your Proton password.
+OmaCustos uses this login session. It never asks for or stores your Proton password.
 The sign-in button uses `xdg-terminal-exec`, available on Omarchy. If it cannot
 open a terminal, use the commands above.
 
 ### 3. Create and run a backup
 
-1. Open **Custos Backup** and press **+** beside **Backup sets**.
+1. Open **OmaCustos** and press **+** beside **Backup sets**.
 2. Name the set, such as **Documents** or **Projects**.
 3. Use **+** under **Source files and folders** to choose what to back up.
 4. Select exclusions with **+** under **Exclusions**, or enter names or paths,
@@ -106,27 +108,27 @@ the current month, the last day of that month is used.
 ### 4. Schedule automatic backups
 
 Choose a **daily**, **weekly**, or **monthly** schedule and press **Save**.
-Custos automatically enables and starts its scheduler; no terminal setup is
+OmaCustos automatically enables and starts its scheduler; no terminal setup is
 needed. Importing backup sets with enabled schedules also activates scheduling.
 Manual-only backup sets do not activate it.
 
 The scheduler area stays hidden when scheduling is working. If activation fails,
 the timer is paused, or it is not enabled to start at login, a visible error
 explains what to do. Your backup settings remain saved. Press **Enable scheduling**
-to retry. Custos checks scheduling automatically while the app is open.
+to retry. OmaCustos checks scheduling automatically while the app is open.
 
 The timer runs as your user while logged in and catches up overdue backups after
 your next login. It does not run while the computer is off or require user
 lingering for this login-session behavior. Make sure Proton Drive is signed in
 before expecting scheduled backups to succeed.
 
-You can close Custos: systemd starts the scheduler automatically at login and
+You can close OmaCustos: systemd starts the scheduler automatically at login and
 runs scheduled backups independently of the app. The app does not need to start
 at login or stay running in the background.
 
 ## Desktop theme
 
-Custos follows your active Omarchy theme and updates its colors while open when
+OmaCustos follows your active Omarchy theme and updates its colors while open when
 you switch themes. On other desktops, it uses the system's Qt color palette.
 
 ## Exclude folders such as node_modules
@@ -145,7 +147,7 @@ only that file or folder. You can also select a specific path with **+**.
 ## Import and export backup sets
 
 Use **Export** in the top-right to save your backup sets as a JSON file.
-Use **Import** to load that file into Custos. Import replaces the configured set list.
+Use **Import** to load that file into OmaCustos. Import replaces the configured set list.
 
 The file contains sources, exclusions, schedules, and settings. Your backed-up
 files, Proton login, and this computer's global resource preset are not included.
@@ -161,14 +163,14 @@ files, Proton login, and this computer's global resource preset are not included
 5. Press **Start restore** at the bottom. The button is available only after
    ticking at least one file and specifying the destination folder.
 
-After a successful restore, the restore panel closes and Custos returns to the
+After a successful restore, the restore panel closes and OmaCustos returns to the
 dashboard. If a restore fails, the panel and your selection stay open for retry.
 
 Incomplete copies expose only verified entries. Missing, failed, malformed, or
 unverifiable items are not presented as successful restores.
 
-For a reinstall or move to another computer, keep or transfer `~/.config/custos`
-so the backup definitions and run history remain available, then install Custos
+For a reinstall or move to another computer, keep or transfer `~/.config/omacustos`
+so the backup definitions and run history remain available, then install OmaCustos
 and authenticate `proton-drive` as the new machine's user. The current UI opens
 remote discovery through **Restore** on a recorded backup; it does not yet have
 a standalone remote-root discovery action for a fresh installation.
@@ -189,10 +191,10 @@ a standalone remote-root discovery action for a fresh installation.
 - To stop scheduling without uninstalling:
 
 ```bash
-systemctl --user disable --now custos.timer
+systemctl --user disable --now omacustos.timer
 ```
 
-Custos shows a scheduling-paused error. Use **Enable scheduling** to resume. Saving
+OmaCustos shows a scheduling-paused error. Use **Enable scheduling** to resume. Saving
 backup settings while an enabled schedule exists also reactivates the timer.
 To make a backup manual-only, choose **disabled** for its schedule and save.
 
@@ -201,13 +203,13 @@ To make a backup manual-only, choose **disabled** for its schedule and save.
 Check the worker log:
 
 ```bash
-journalctl --user -u custos.service
+journalctl --user -u omacustos.service
 ```
 
 Check the timer and Proton CLI:
 
 ```bash
-systemctl --user status custos.timer
+systemctl --user status omacustos.timer
 command -v proton-drive
 proton-drive filesystem info /my-files
 ```
@@ -220,11 +222,11 @@ unreadable source paths are reported in the preview and manifest.
 Stop scheduling first if it is enabled, then remove the package:
 
 ```bash
-systemctl --user disable --now custos.timer
-sudo pacman -Rns custos-git
+systemctl --user disable --now omacustos.timer
+sudo pacman -Rns omacustos-git
 ```
 
-Package removal does not delete `~/.config/custos`, the user-systemd resource
+Package removal does not delete `~/.config/omacustos`, the user-systemd resource
 drop-in, or remote backups. Keep your configuration and backups if you may need
 to restore later.
 
@@ -243,5 +245,5 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The main binaries are `build/custos` and `build/custos-worker`. The Arch package
+The main binaries are `build/omacustos` and `build/omacustos-worker`. The Arch package
 recipe is in `pkgbuild/`.

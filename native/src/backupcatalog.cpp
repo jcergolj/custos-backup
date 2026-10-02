@@ -82,11 +82,11 @@ bool visit(BackupProvider &provider, const QString &path, const QString &rootPat
             warning(error, QStringLiteral("The remote manifest %1 is unavailable: %2").arg(item.path, manifestError));
             continue;
         }
-        if (info.version != 2 || info.application != QStringLiteral("custos")
+        if (info.version != 2 || info.application != QStringLiteral("omacustos")
             || info.computerName.isEmpty() || info.setId.isEmpty() || info.copyId.isEmpty()
             || !info.createdAt.isValid()
             || (info.status != QStringLiteral("complete") && info.status != QStringLiteral("incomplete"))) {
-            warning(error, QStringLiteral("The remote manifest %1 is not a supported Custos Backup copy.").arg(item.path));
+            warning(error, QStringLiteral("The remote manifest %1 is not a supported OmaCustos copy.").arg(item.path));
             continue;
         }
 

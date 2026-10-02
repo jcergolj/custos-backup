@@ -27,11 +27,11 @@ case "$*" in
   '--user daemon-reload')
     if [ -f "$base/reload-fails" ]; then printf 'Manager unavailable' >&2; exit 1; fi
     ;;
-  '--user enable --now custos.timer')
-    if [ -f "$base/enable-fails" ]; then printf 'Unit custos.timer is masked' >&2; exit 1; fi
+  '--user enable --now omacustos.timer')
+    if [ -f "$base/enable-fails" ]; then printf 'Unit omacustos.timer is masked' >&2; exit 1; fi
     if [ ! -f "$base/not-active" ]; then printf yes > "$base/active"; fi
     ;;
-  '--user show custos.timer --property=LoadState --property=ActiveState --property=UnitFileState')
+  '--user show omacustos.timer --property=LoadState --property=ActiveState --property=UnitFileState')
     if [ -f "$base/query-fails" ]; then printf 'User bus unavailable' >&2; exit 1; fi
     printf 'LoadState=loaded\n'
     if [ -f "$base/active" ]; then
@@ -95,10 +95,10 @@ private slots:
         QCOMPARE(messages.count(), 1);
         const QByteArray commands = calls(home);
         const int reload = commands.indexOf("--user daemon-reload\n");
-        const int enable = commands.indexOf("--user enable --now custos.timer\n");
+        const int enable = commands.indexOf("--user enable --now omacustos.timer\n");
         QVERIFY(reload >= 0 && enable > reload);
         QVERIFY(commands.indexOf("--user show", enable) > enable);
-        QVERIFY(!commands.contains("start custos.service"));
+        QVERIFY(!commands.contains("start omacustos.service"));
     }
 
     void openingAPausedScheduleOnlyReadsTimerState()
@@ -162,7 +162,7 @@ private slots:
         QVERIFY(!scheduler.ready());
         QVERIFY(!scheduler.error().isEmpty());
         if (failureFile == "enable-fails") {
-            QVERIFY(scheduler.error().contains("systemctl --user unmask custos.timer"));
+            QVERIFY(scheduler.error().contains("systemctl --user unmask omacustos.timer"));
         }
         QCOMPARE(errors.count(), 1);
         const QString activationError = scheduler.error();

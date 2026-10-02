@@ -79,7 +79,7 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
         return false;
     }
 
-    if (version == 2 && (root.value(QStringLiteral("application")).toString() != QStringLiteral("custos")
+    if (version == 2 && (root.value(QStringLiteral("application")).toString() != QStringLiteral("omacustos")
             || root.value(QStringLiteral("computer")).toString().isEmpty()
             || root.value(QStringLiteral("set_id")).toString().isEmpty()
             || root.value(QStringLiteral("copy_id")).toString().isEmpty()
