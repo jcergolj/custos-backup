@@ -233,6 +233,28 @@ proton-drive filesystem info /my-files
 An AC-power requirement makes a backup wait while on battery power. Missing or
 unreadable source paths are reported in the preview and manifest.
 
+Uploads and downloads have a 24-hour total runtime limit per CLI command, so large
+files and slow transfers can run longer than five minutes. Metadata commands keep
+their five-minute limit. The CLI has no documented live-progress feed; silent or
+stalled transfers are stopped at the same total runtime limit, rather than an
+inactivity deadline. Timeout errors are shown separately from start failures and
+crashes, and a timed-out backup does not trigger retention cleanup.
+
+To change the transfer limit, set `OMACUSTOS_TRANSFER_TIMEOUT_SECONDS` to a positive
+whole number of seconds in the app's environment. For manual and scheduled backups,
+set it in the worker service using `systemctl --user edit omacustos.service`:
+
+```ini
+[Service]
+Environment=OMACUSTOS_TRANSFER_TIMEOUT_SECONDS=172800
+```
+
+Run `systemctl --user daemon-reload` afterward; the setting applies to the next
+worker. For restores, launch the app with the variable, for example
+`OMACUSTOS_TRANSFER_TIMEOUT_SECONDS=172800 omacustos`. This example allows 48 hours
+per transfer. Empty, invalid, nonpositive, or values above 2147483 seconds use the
+24-hour default.
+
 ## Uninstall
 
 Stop scheduling first if it is enabled, then remove the package:

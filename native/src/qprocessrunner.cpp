@@ -1,36 +1,92 @@
 #include "qprocessrunner.h"
 
+#include <QElapsedTimer>
 #include <QProcess>
+#include <limits>
 
 namespace {
 
-constexpr int processTimeoutMilliseconds = 5 * 60 * 1000;
+bool isTransfer(const QStringList &arguments)
+{
+    return arguments.size() >= 2 && arguments.at(0) == QStringLiteral("filesystem")
+        && (arguments.at(1) == QStringLiteral("upload") || arguments.at(1) == QStringLiteral("download"));
+}
 
 }
 
-QProcessRunner::QProcessRunner(QString executable)
-    : executable(std::move(executable))
+ProcessTimeouts ProcessTimeouts::fromEnvironment()
 {
+    ProcessTimeouts timeouts;
+    bool valid = false;
+    const qint64 seconds = qEnvironmentVariable("OMACUSTOS_TRANSFER_TIMEOUT_SECONDS").toLongLong(&valid);
+    if (valid && seconds > 0 && seconds <= std::numeric_limits<int>::max() / 1000) {
+        timeouts.transferMilliseconds = static_cast<int>(seconds * 1000);
+    }
+    return timeouts;
+}
+
+QProcessRunner::QProcessRunner(QString executable, ProcessTimeouts timeouts)
+    : executable(std::move(executable)), timeouts(timeouts)
+{
+    // Never pass zero or a negative (unbounded) timeout to QProcess.
+    this->timeouts.metadataMilliseconds = qMax(1, timeouts.metadataMilliseconds);
+    this->timeouts.transferMilliseconds = qMax(1, timeouts.transferMilliseconds);
 }
 
 ProcessOutput QProcessRunner::run(const QStringList &arguments)
 {
     QProcess process;
+    const bool transfer = isTransfer(arguments);
+    const int timeout = transfer ? timeouts.transferMilliseconds : timeouts.metadataMilliseconds;
+    QElapsedTimer elapsed;
+    elapsed.start();
     process.start(executable, arguments);
 
-    if (!process.waitForFinished(processTimeoutMilliseconds)) {
+    const auto failure = [&](const QString &message) {
+        const QString details = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
+        return ProcessOutput {-1, QString::fromLocal8Bit(process.readAllStandardOutput()),
+            details.isEmpty() ? message : message + QStringLiteral("\n") + details};
+    };
+
+    if (!process.waitForStarted(qMin(timeout, 30 * 1000))) {
+        const QString message = process.error() == QProcess::Timedout
+            ? QStringLiteral("Starting %1 timed out.").arg(executable)
+            : QStringLiteral("Unable to start %1: %2").arg(executable, process.errorString());
         process.kill();
-        process.waitForFinished();
-        return {
-            -1,
-            QString::fromLocal8Bit(process.readAllStandardOutput()),
-            QStringLiteral("The Proton Drive command timed out."),
-        };
+        process.waitForFinished(5000);
+        return failure(message);
     }
 
+    // The CLI has no documented live byte-progress feed. Output is not evidence
+    // of progress, so transfers use a configurable, bounded total runtime.
+    if (!process.waitForFinished(static_cast<int>(qMax(qint64(1), timeout - elapsed.elapsed())))) {
+        if (process.error() == QProcess::Timedout) {
+            process.kill();
+            process.waitForFinished(5000);
+            return failure(QStringLiteral("The %1 %2 timed out after %3 seconds (total runtime limit).")
+                .arg(executable, transfer ? QStringLiteral("transfer") : QStringLiteral("command"))
+                .arg(timeout / 1000.0));
+        }
+        if (process.exitStatus() != QProcess::CrashExit) {
+            const QString message = QStringLiteral("The %1 command failed: %2").arg(executable, process.errorString());
+            process.kill();
+            process.waitForFinished(5000);
+            return failure(message);
+        }
+    }
+
+    if (process.exitStatus() == QProcess::CrashExit) {
+        return failure(QStringLiteral("The %1 command crashed: %2").arg(executable, process.errorString()));
+    }
+
+    QString standardError = QString::fromLocal8Bit(process.readAllStandardError());
+    if (process.exitCode() != 0 && standardError.trimmed().isEmpty()) {
+        standardError = QStringLiteral("The %1 command failed with exit code %2.")
+            .arg(executable).arg(process.exitCode());
+    }
     return {
         process.exitCode(),
         QString::fromLocal8Bit(process.readAllStandardOutput()),
-        QString::fromLocal8Bit(process.readAllStandardError()),
+        standardError,
     };
 }

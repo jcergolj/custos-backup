@@ -78,6 +78,17 @@ target_link_libraries(omacustos PRIVATE
 
 enable_testing()
 
+qt_add_executable(qprocessrunner-test
+    tests/qprocessrunner_test.cpp
+    src/qprocessrunner.cpp
+    src/protonprovider.cpp
+    src/backupengine.cpp
+    src/backupmanifest.cpp
+)
+target_link_libraries(qprocessrunner-test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qprocessrunner-test COMMAND qprocessrunner-test)
+set_tests_properties(qprocessrunner-test PROPERTIES TIMEOUT 30)
+
 qt_add_executable(backupscheduler-test tests/backupscheduler_test.cpp
     src/backupscheduler.cpp src/backupconfig.cpp)
 target_link_libraries(backupscheduler-test PRIVATE Qt6::Core Qt6::Test)

@@ -76,6 +76,23 @@ download using `size` or `activeRevision.claimedSize`, not encrypted storage siz
 The manifest records the local SHA-256 checksum; a provider SHA-256
 field is used when the CLI exposes one.
 
+`QProcessRunner` uses a five-minute total runtime limit for metadata and other
+commands, and a separate 24-hour limit for `filesystem upload` and
+`filesystem download`, including manifest transfers. A positive integer
+`OMACUSTOS_TRANSFER_TIMEOUT_SECONDS` overrides the transfer limit (maximum
+2147483 seconds); invalid values fall back to the default. Worker and GUI
+environments are independent, so configuring only the service changes backups,
+while restores use the app's environment.
+
+These are wall-clock limits, not inactivity detection: CLI output is not treated
+as proof of byte progress and cannot extend the deadline. Process startup is
+bounded to 30 seconds or the operation's limit, whichever is shorter. Startup,
+timeout, abnormal exit, and nonzero-exit diagnostics remain distinct and preserve
+CLI stderr. Timed-out commands are killed and return a failure even if partial
+remote content exists. The normal manifest verification and success-only
+retention gates still apply. Tests inject millisecond timeout policies and use
+a local subprocess fixture for progressing, silent, and failing commands.
+
 Recent-backup browser links open the copy recorded for that run in
 the signed-in Proton Drive web app. OmaCustos resolves the folder's node ID and an
 ancestor's share ID through read-only CLI metadata requests in the background;
