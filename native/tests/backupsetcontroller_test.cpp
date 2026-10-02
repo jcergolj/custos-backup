@@ -1,4 +1,5 @@
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLockFile>
@@ -24,6 +25,8 @@ private slots:
     void invalidImportLeavesExistingSetsUntouched_data();
     void invalidImportLeavesExistingSetsUntouched();
     void emptyImportDoesNotRestoreLegacySources();
+    void removingFinalSetPersistsEmptyConfiguration_data();
+    void removingFinalSetPersistsEmptyConfiguration();
     void exportCannotOverwriteLocalState();
     void importIsBlockedWhileWorkerRuns();
     void successfulSaveNotifiesSchedulingButPreviewAndFailedSaveDoNot();
@@ -350,6 +353,81 @@ void BackupSetControllerTest::emptyImportDoesNotRestoreLegacySources()
     BackupConfig reloaded;
     QVERIFY(BackupConfigStore(configPath).load(&reloaded));
     QVERIFY(reloaded.sets.isEmpty());
+}
+
+void BackupSetControllerTest::removingFinalSetPersistsEmptyConfiguration_data()
+{
+    QTest::addColumn<bool>("legacy");
+    QTest::newRow("saved scheduled backup") << false;
+    QTest::newRow("legacy single-source backup") << true;
+}
+
+void BackupSetControllerTest::removingFinalSetPersistsEmptyConfiguration()
+{
+    QFETCH(bool, legacy);
+    QTemporaryDir directory;
+    QTemporaryDir remote;
+    QVERIFY(directory.isValid());
+    QVERIFY(remote.isValid());
+    const QString configPath = directory.filePath("settings.json");
+    const QString source = directory.filePath("Documents");
+    const QString copyPath = remote.filePath("computer/Documents/copy");
+    QVERIFY(QDir().mkpath(copyPath));
+    QFile payload(QDir(copyPath).filePath("notes.txt"));
+    QVERIFY(payload.open(QIODevice::WriteOnly));
+    const QByteArray contents("Existing remote backup contents");
+    QCOMPARE(payload.write(contents), qint64(contents.size()));
+    payload.close();
+
+    BackupConfig config;
+    config.protonBinary = "/custom/proton-drive";
+    if (legacy) {
+        config.sourceDirectory = source;
+        config.remoteRoot = remote.path();
+    } else {
+        BackupSet set {"documents", "Documents", remote.path(), {source}, {}};
+        set.schedule.frequency = "daily";
+        config.sets = {set};
+    }
+    BackupConfigStore store(configPath);
+    QVERIFY(store.save(config));
+
+    BackupEngine engine;
+    BackupSetController controller(engine, configPath);
+    QCOMPARE(controller.setNames(), QStringList {legacy ? "Default backup" : "Documents"});
+    QCOMPARE(controller.currentSources(), QStringList {source});
+    QCOMPARE(controller.currentScheduleFrequency(), QString(legacy ? "disabled" : "daily"));
+    QSignalSpy saved(&controller, &BackupSetController::configurationSaved);
+    QSignalSpy failed(&controller, &BackupSetController::failed);
+    controller.removeCurrentSet();
+    QVERIFY(failed.isEmpty());
+    QCOMPARE(saved.count(), 1);
+    QVERIFY(controller.setNames().isEmpty());
+    QCOMPARE(controller.currentIndex(), -1);
+
+    QFile persisted(configPath);
+    QVERIFY(persisted.open(QIODevice::ReadOnly));
+    const QJsonObject document = QJsonDocument::fromJson(persisted.readAll()).object();
+    QVERIFY(document.value("sets").isArray());
+    QVERIFY(document.value("sets").toArray().isEmpty());
+    QVERIFY(!document.contains("source_directory"));
+    QVERIFY(!document.contains("remote_root"));
+    BackupConfig reloaded;
+    QVERIFY(store.load(&reloaded));
+    QVERIFY(reloaded.sets.isEmpty());
+    QCOMPARE(reloaded.protonBinary, config.protonBinary);
+
+    BackupSetController reopened(engine, configPath);
+    QVERIFY(reopened.setNames().isEmpty());
+    QVERIFY(reopened.setIds().isEmpty());
+    QVERIFY(reopened.currentSources().isEmpty());
+    QVERIFY(reopened.recentBackups().isEmpty());
+    QCOMPARE(reopened.currentIndex(), -1);
+    QCOMPARE(reopened.currentScheduleFrequency(), QStringLiteral("disabled"));
+    QCOMPARE(reopened.currentNextRun(), QStringLiteral("Not scheduled"));
+    QVERIFY(payload.open(QIODevice::ReadOnly));
+    QCOMPARE(payload.readAll(), contents);
+    QVERIFY(QFileInfo(copyPath).isDir());
 }
 
 void BackupSetControllerTest::exportCannotOverwriteLocalState()
