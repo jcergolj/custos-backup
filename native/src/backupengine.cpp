@@ -12,6 +12,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QScopeGuard>
+#include <QTemporaryDir>
 #include <QUuid>
 
 #include <algorithm>
@@ -82,6 +83,24 @@ bool sha256(QFile &file, QByteArray *checksum)
             return false;
         }
         hash.addData(chunk);
+    }
+    *checksum = hash.result();
+    return true;
+}
+
+bool copyAndHash(QFile &source, QFile &snapshot, QByteArray *checksum)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!source.atEnd()) {
+        const QByteArray chunk = source.read(1024 * 1024);
+        if ((chunk.isEmpty() && source.error() != QFileDevice::NoError)
+            || snapshot.write(chunk) != chunk.size()) {
+            return false;
+        }
+        hash.addData(chunk);
+    }
+    if (!snapshot.flush()) {
+        return false;
     }
     *checksum = hash.result();
     return true;
@@ -374,17 +393,39 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
             failFile(QStringLiteral("reading"), QStringLiteral("The source file could not be read: %1").arg(sourceFile.errorString()));
             continue;
         }
-        const qint64 sourceSize = sourceFile.size();
+        // Hash the bytes copied into a private snapshot and upload that same
+        // read-only file, never a source pathname that can change afterward.
+        QTemporaryDir staging(QDir::temp().filePath(QStringLiteral("omacustos-payload-XXXXXX")));
+        if (!staging.isValid()) {
+            failFile(QStringLiteral("reading"), QStringLiteral("The backup staging folder could not be created."));
+            continue;
+        }
+        QFile snapshot(staging.filePath(QFileInfo(remotePath).fileName()));
+        if (!snapshot.open(QIODevice::WriteOnly)) {
+            failFile(QStringLiteral("reading"), QStringLiteral("The backup payload could not be staged: %1").arg(snapshot.errorString()));
+            continue;
+        }
         QByteArray sourceChecksum;
-        if (!sha256(sourceFile, &sourceChecksum)) {
-            failFile(QStringLiteral("reading"), QStringLiteral("The source file could not be read: %1").arg(sourceFile.errorString()));
+        if (!copyAndHash(sourceFile, snapshot, &sourceChecksum)) {
+            failFile(QStringLiteral("reading"), sourceFile.error() != QFileDevice::NoError
+                ? QStringLiteral("The source file could not be read: %1").arg(sourceFile.errorString())
+                : QStringLiteral("The backup payload could not be staged: %1").arg(snapshot.errorString()));
+            continue;
+        }
+        const qint64 sourceSize = snapshot.size();
+        snapshot.close();
+        sourceFile.close();
+        if (!snapshot.setPermissions(QFileDevice::ReadOwner)) {
+            failFile(QStringLiteral("reading"), QStringLiteral("The staged backup payload could not be made read-only."));
             continue;
         }
         RemoteFile remoteFile;
         reportPhase(QStringLiteral("checking"));
+        // Size-only metadata cannot establish that an existing payload matches
+        // this snapshot, so providers without checksums must upload it again.
         const bool alreadyVerified = provider.inspect(remotePath, &remoteFile, &providerError)
             && remoteFile.size == sourceSize
-            && (remoteFile.checksum.isEmpty() || remoteFile.checksum == sourceChecksum);
+            && !remoteFile.checksum.isEmpty() && remoteFile.checksum == sourceChecksum;
 
         if (!alreadyVerified) {
             if (!provider.ensureDirectory(QFileInfo(remotePath).path(), &providerError)) {
@@ -394,7 +435,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
                 continue;
             }
             reportPhase(QStringLiteral("uploading"));
-            if (!provider.upload(sourcePath, remotePath, &providerError)) {
+            if (!provider.upload(snapshot.fileName(), remotePath, &providerError)) {
                 failFile(QStringLiteral("uploading"), providerError.isEmpty()
                     ? QStringLiteral("The file could not be uploaded.")
                     : providerError);

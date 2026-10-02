@@ -4,6 +4,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
+#include <QScopeGuard>
 
 #include "../src/backupengine.h"
 #include "../src/backupmanifest.h"
@@ -16,8 +18,11 @@ public:
     LocalProvider local;
     bool failManifest = false;
     bool failAll = false;
+    bool omitChecksum = false;
+    QStringList uploadedPayloads;
     bool upload(const QString &source, const QString &remote, QString *error) override
     {
+        if (!remote.endsWith("manifest.json")) uploadedPayloads.append(source);
         if (remote.endsWith("bad-upload") || (failManifest && remote.endsWith("manifest.json"))
             || (failAll && !remote.endsWith("manifest.json"))) {
             if (error) *error = QStringLiteral("Connection interrupted");
@@ -29,6 +34,7 @@ public:
     {
         if (!local.inspect(path, file, error)) return false;
         if (path.endsWith("bad-verify")) ++file->size;
+        if (omitChecksum) file->checksum.clear();
         return true;
     }
     bool ensureDirectory(const QString &path, QString *error) override { return local.ensureDirectory(path, error); }
@@ -52,6 +58,9 @@ private slots:
     void skipsHiddenSymbolicLinksUnlessExcluded();
     void backsUpVerifiesAndRestoresOneFile();
     void backsUpStoresVerifiedChecksum();
+    void sourceChangesAfterHashingRestoreStagedContent_data();
+    void sourceChangesAfterHashingRestoreStagedContent();
+    void sizeOnlyMetadataDoesNotReuseDifferentContent();
     void reservesManifestPathForSourceFiles();
     void previewsMultipleSourcesAndExclusions();
     void excludesMatchingFolderNamesAtEveryDepth_data();
@@ -178,6 +187,9 @@ void BackupEngineTest::reportsFailuresAndKeepsOnlyVerifiedFilesRestorable()
     QCOMPARE(result.issues.first().path, source.filePath("bad-upload"));
     QCOMPARE(result.issues.first().phase, QString("uploading"));
     QCOMPARE(result.issues.first().reason, QString("Connection interrupted"));
+    for (const QString &path : provider.uploadedPayloads) {
+        QVERIFY(!QFileInfo::exists(QFileInfo(path).path()));
+    }
     if (failManifest) {
         QVERIFY(manifest.isEmpty());
         QCOMPARE(error, QString("Connection interrupted"));
@@ -290,6 +302,115 @@ void BackupEngineTest::backsUpStoresVerifiedChecksum()
     QCOMPARE(entries.size(), 1);
     QCOMPARE(entries.first().checksum,
         QCryptographicHash::hash("important content", QCryptographicHash::Sha256));
+}
+
+void BackupEngineTest::sourceChangesAfterHashingRestoreStagedContent_data()
+{
+    QTest::addColumn<bool>("atomicReplacement");
+    QTest::newRow("same-sized in-place edit") << false;
+    QTest::newRow("atomic pathname replacement") << true;
+}
+
+void BackupEngineTest::sourceChangesAfterHashingRestoreStagedContent()
+{
+    QFETCH(bool, atomicReplacement);
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(source.isValid() && remote.isValid() && destination.isValid());
+    const QString sourcePath = source.filePath(QStringLiteral("notes.txt"));
+    QFile original(sourcePath);
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    QCOMPARE(original.write("good"), qint64(4));
+    original.close();
+
+    BackupEngine engine;
+    FailingProvider provider(remote.path());
+    provider.omitChecksum = true; // Proton provides size-only metadata.
+    QString manifest;
+    QString error;
+    bool changed = false;
+    const BackupCopyMetadata metadata {"computer", "set", "Documents", "copy", QDateTime::currentDateTimeUtc()};
+    const bool success = engine.backup({source.path()}, "copy", {}, metadata, provider, &manifest, &error,
+        [&](const BackupProgress &progress) {
+            if (progress.phase != QStringLiteral("uploading") || changed) return;
+            // This callback runs after hashing and immediately before the
+            // provider opens the upload pathname, reproducing the race exactly.
+            if (atomicReplacement) {
+                QSaveFile replacement(sourcePath);
+                QVERIFY(replacement.open(QIODevice::WriteOnly));
+                QCOMPARE(replacement.write("evil"), qint64(4));
+                QVERIFY(replacement.commit());
+            } else {
+                QFile edited(sourcePath);
+                QVERIFY(edited.open(QIODevice::WriteOnly));
+                QCOMPARE(edited.write("evil"), qint64(4));
+            }
+            changed = true;
+        });
+    const auto cleanupManifest = qScopeGuard([&] {
+        if (!manifest.isEmpty()) QDir(QFileInfo(manifest).path()).removeRecursively();
+    });
+    QVERIFY(changed);
+    QVERIFY2(success, qPrintable(error));
+    QVector<BackupEntry> entries;
+    BackupManifestInfo info;
+    QVERIFY2(BackupManifest::load(manifest, &entries, &info, &error), qPrintable(error));
+    QCOMPARE(info.status, QStringLiteral("complete"));
+    QCOMPARE(entries.size(), 1);
+    const BackupEntry entry = entries.first();
+    QCOMPARE(entry.sourcePath, sourcePath);
+    QCOMPARE(entry.checksum, QCryptographicHash::hash("good", QCryptographicHash::Sha256));
+    QFile uploaded(remote.filePath(entry.remotePath));
+    QVERIFY(uploaded.open(QIODevice::ReadOnly));
+    QCOMPARE(uploaded.readAll(), QByteArray("good"));
+    QVERIFY2(engine.restoreFile(entry, destination.path(), provider, &error), qPrintable(error));
+    QFile restored(destination.filePath("notes.txt"));
+    QVERIFY(restored.open(QIODevice::ReadOnly));
+    QCOMPARE(restored.readAll(), QByteArray("good"));
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    QCOMPARE(original.readAll(), QByteArray("evil"));
+    QCOMPARE(provider.uploadedPayloads.size(), 1);
+    QVERIFY(provider.uploadedPayloads.first() != sourcePath);
+    QVERIFY(!QFileInfo::exists(QFileInfo(provider.uploadedPayloads.first()).path()));
+}
+
+void BackupEngineTest::sizeOnlyMetadataDoesNotReuseDifferentContent()
+{
+    QTemporaryDir source;
+    QTemporaryDir remote;
+    QTemporaryDir destination;
+    QVERIFY(source.isValid() && remote.isValid() && destination.isValid());
+    QFile original(source.filePath("retry.txt"));
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    QCOMPARE(original.write("old!"), qint64(4));
+    original.close();
+    BackupEngine engine;
+    FailingProvider provider(remote.path());
+    provider.omitChecksum = true;
+    QString manifest;
+    QString error;
+    QVERIFY2(engine.backup(source.path(), "copy", provider, &manifest, &error), qPrintable(error));
+    const QString firstManifest = manifest;
+    const auto cleanupManifests = qScopeGuard([&] {
+        QDir(QFileInfo(firstManifest).path()).removeRecursively();
+        if (manifest != firstManifest && !manifest.isEmpty()) QDir(QFileInfo(manifest).path()).removeRecursively();
+    });
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    QCOMPARE(original.write("new!"), qint64(4));
+    original.close();
+    QVERIFY2(engine.backup(source.path(), "copy", provider, &manifest, &error), qPrintable(error));
+    QVector<BackupEntry> entries;
+    QVERIFY2(BackupManifest::load(manifest, &entries, &error), qPrintable(error));
+    QCOMPARE(entries.size(), 1);
+    QVERIFY2(engine.restoreFile(entries.first(), destination.path(), provider, &error), qPrintable(error));
+    QFile restored(destination.filePath("retry.txt"));
+    QVERIFY(restored.open(QIODevice::ReadOnly));
+    QCOMPARE(restored.readAll(), QByteArray("new!"));
+    QCOMPARE(provider.uploadedPayloads.size(), 2);
+    for (const QString &path : provider.uploadedPayloads) {
+        QVERIFY(!QFileInfo::exists(QFileInfo(path).path()));
+    }
 }
 
 void BackupEngineTest::reservesManifestPathForSourceFiles()
@@ -492,11 +613,12 @@ void BackupEngineTest::reusesAnExistingVerifiedCopyOnRetry()
     file.close();
 
     BackupEngine engine;
-    LocalProvider provider(remote.path());
+    FailingProvider provider(remote.path());
     QString manifestPath;
     QString error;
     QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
     QVERIFY(engine.backup(source.path(), QStringLiteral("copy"), provider, &manifestPath, &error));
+    QCOMPARE(provider.uploadedPayloads.size(), 1);
 }
 
 void BackupEngineTest::backsUpAndRestoresHiddenContents_data()

@@ -79,8 +79,16 @@ The Proton Drive provider uses the official CLI for:
 
 OmaCustos never calls `empty-trash`. Remote content size is verified after upload and
 download using `size` or `activeRevision.claimedSize`, not encrypted storage size.
-The manifest records the local SHA-256 checksum; a provider SHA-256
-field is used when the CLI exposes one.
+Each payload is copied into a private temporary folder and hashed while copying.
+The resulting read-only staged file is uploaded under the requested remote
+basename, so source edits or pathname replacement cannot invalidate the recorded
+SHA-256. Staging holds one payload at a time and is removed after verification or
+failure; the temporary filesystem needs space for the largest payload. Read or
+staging failures produce failed items, never successful entries.
+
+A provider SHA-256 field is used when the CLI exposes one. Existing remote payloads
+are reused only when both size and checksum match the staged bytes. With size-only
+metadata, retries re-upload the snapshot rather than trusting same-sized content.
 
 `QProcessRunner` uses a five-minute total runtime limit for metadata and other
 commands, and a separate 24-hour limit for `filesystem upload` and
