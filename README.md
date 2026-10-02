@@ -66,6 +66,12 @@ subdirectories by default, including `.env` and `.git`; use exclusions to omit
 any you do not want backed up. Use **Preview** to review included, excluded,
 skipped, and missing paths before running.
 
+Preview shows separate **Included**, **Excluded**, **Skipped**, and **Missing**
+sections with counts and an explanation when a section is empty. Scroll each
+nonempty list to inspect its full paths; paths wrap and can be selected and copied.
+Only included files will be attempted. Preview does not save settings, start a
+backup, or enable scheduling; press **Preview** again after editing the selection.
+
 Each named backup set has its own files, exclusions, and schedule. Every run
 creates a separate copy. By default, copies are stored under `/my-files/backups`
 in Proton Drive, and the latest three verified successful copies are kept.

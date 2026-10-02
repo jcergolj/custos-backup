@@ -478,6 +478,11 @@ QString BackupSetController::recentBackupFolderPath(const QString &setId) const
     return {};
 }
 
+bool BackupSetController::previewAvailable() const
+{
+    return hasPreview;
+}
+
 QStringList BackupSetController::previewIncluded() const
 {
     return previewResult.includedFiles;
@@ -575,6 +580,7 @@ void BackupSetController::preview()
     }
 
     previewResult = engine.preview(set->sourceDirectories, set->exclusions);
+    hasPreview = true;
     emit previewChanged();
     emit statusChanged(QString());
 }
@@ -723,6 +729,7 @@ QVector<int> BackupSetController::recentBackupIndexes() const
 void BackupSetController::clearPreview()
 {
     previewResult = {};
+    hasPreview = false;
     emit previewChanged();
 }
 

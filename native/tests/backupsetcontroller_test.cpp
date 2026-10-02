@@ -18,6 +18,8 @@ class BackupSetControllerTest final : public QObject
 private slots:
     void previewUpdatesFilesWithoutCountMessage_data();
     void previewUpdatesFilesWithoutCountMessage();
+    void previewGroupsAreReadOnlyAndResetWithSelection_data();
+    void previewGroupsAreReadOnlyAndResetWithSelection();
     void recentBackupTimestampIncludesLocalDateAndSeconds();
     void folderPathUsesBackupIdentityAndWorkerNaming();
     void deletedCopyDisappearsFromRecentBackupsButKeepsItsSet();
@@ -168,13 +170,80 @@ void BackupSetControllerTest::previewUpdatesFilesWithoutCountMessage()
     QSignalSpy statusSpy(&controller, &BackupSetController::statusChanged);
     QSignalSpy failureSpy(&controller, &BackupSetController::failed);
 
+    QVERIFY(!controller.previewAvailable());
     controller.preview();
 
+    QVERIFY(controller.previewAvailable());
     QCOMPARE(previewSpy.count(), 1);
     QCOMPARE(controller.previewIncluded(), hasSource ? QStringList {source.fileName()} : QStringList {});
     QCOMPARE(statusSpy.count(), 1);
     QVERIFY(statusSpy.first().first().toString().isEmpty());
     QVERIFY(failureSpy.isEmpty());
+}
+
+void BackupSetControllerTest::previewGroupsAreReadOnlyAndResetWithSelection_data()
+{
+    QTest::addColumn<bool>("mixed");
+    QTest::newRow("mixed results") << true;
+    QTest::newRow("only missing and skipped") << false;
+}
+
+void BackupSetControllerTest::previewGroupsAreReadOnlyAndResetWithSelection()
+{
+    QFETCH(bool, mixed);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString included = directory.filePath("notes.txt");
+    const QString excluded = directory.filePath("excluded.txt");
+    const QString skipped = directory.filePath("link.txt");
+    const QString missing = directory.filePath("missing.txt");
+    for (const QString &path : {included, excluded}) {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("content"), 7);
+    }
+    QVERIFY(QFile::link(included, skipped));
+    const QString configPath = directory.filePath("settings.json");
+    BackupConfig config;
+    config.sets = {{"documents", "Documents", "/my-files/backups", {included}, {}},
+                   {"photos", "Photos", "/my-files/backups", {included}, {}}};
+    QVERIFY(BackupConfigStore(configPath).save(config));
+    QFile savedConfig(configPath);
+    QVERIFY(savedConfig.open(QIODevice::ReadOnly));
+    const QByteArray originalConfig = savedConfig.readAll();
+    savedConfig.close();
+
+    BackupEngine engine;
+    BackupSetController controller(engine, configPath);
+    controller.setCurrentSources(mixed ? QStringList {included, excluded, skipped, missing}
+                                       : QStringList {skipped, missing});
+    controller.setCurrentExclusions({excluded});
+    controller.setCurrentScheduleFrequency("daily");
+    QSignalSpy saved(&controller, &BackupSetController::configurationSaved);
+    controller.preview();
+
+    QVERIFY(controller.previewAvailable());
+    QCOMPARE(controller.previewIncluded(), mixed ? QStringList {included} : QStringList {});
+    QCOMPARE(controller.previewExcluded(), mixed ? QStringList {excluded} : QStringList {});
+    QCOMPARE(controller.previewSkipped(), QStringList {skipped});
+    QCOMPARE(controller.previewMissing(), QStringList {missing});
+    QVERIFY(saved.isEmpty());
+    QVERIFY(controller.runningSetIds().isEmpty());
+    QVERIFY(!QFile::exists(directory.filePath("omacustos-backup-runs.json")));
+    QVERIFY(savedConfig.open(QIODevice::ReadOnly));
+    QCOMPARE(savedConfig.readAll(), originalConfig);
+
+    controller.setCurrentIndex(1);
+    QVERIFY(!controller.previewAvailable());
+    QVERIFY(controller.previewIncluded().isEmpty());
+    QVERIFY(controller.previewExcluded().isEmpty());
+    QVERIFY(controller.previewSkipped().isEmpty());
+    QVERIFY(controller.previewMissing().isEmpty());
+    controller.preview();
+    QVERIFY(controller.previewAvailable());
+    QCOMPARE(controller.previewIncluded(), QStringList {included});
+    controller.addSet();
+    QVERIFY(!controller.previewAvailable());
 }
 
 void BackupSetControllerTest::recentBackupTimestampIncludesLocalDateAndSeconds()

@@ -38,6 +38,7 @@ class BackupSetController final : public QObject
     Q_PROPERTY(QStringList recentBackups READ recentBackups NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackupSetIds READ recentBackupSetIds NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackupTimestamps READ recentBackupTimestamps NOTIFY dashboardChanged)
+    Q_PROPERTY(bool previewAvailable READ previewAvailable NOTIFY previewChanged)
     Q_PROPERTY(QStringList previewIncluded READ previewIncluded NOTIFY previewChanged)
     Q_PROPERTY(QStringList previewExcluded READ previewExcluded NOTIFY previewChanged)
     Q_PROPERTY(QStringList previewSkipped READ previewSkipped NOTIFY previewChanged)
@@ -85,6 +86,7 @@ public:
     QStringList recentBackups() const;
     QStringList recentBackupSetIds() const;
     QStringList recentBackupTimestamps() const;
+    bool previewAvailable() const;
     QStringList previewIncluded() const;
     QStringList previewExcluded() const;
     QStringList previewSkipped() const;
@@ -129,5 +131,6 @@ private:
     BackupConfig config;
     int selectedIndex = -1;
     BackupPreview previewResult;
+    bool hasPreview = false;
     QTimer stateTimer;
 };

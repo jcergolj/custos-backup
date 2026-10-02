@@ -73,6 +73,56 @@ ApplicationWindow {
         Layout.preferredHeight: 36
     }
 
+    component PreviewGroup: GroupBox {
+        id: group
+        required property string key
+        required property string heading
+        required property string emptyText
+        required property var paths
+        objectName: "previewGroup-" + key
+        title: qsTr("%1 (%2)").arg(heading).arg(paths.length)
+        Layout.fillWidth: true
+
+        ColumnLayout {
+            anchors.fill: parent
+
+            Label {
+                objectName: "previewEmpty-" + group.key
+                text: group.emptyText
+                visible: group.paths.length === 0
+                font.pixelSize: root.metadataTypeSize
+                color: root.mutedColor
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            ListView {
+                id: pathsList
+                objectName: "previewPaths-" + group.key
+                model: group.paths
+                visible: count > 0
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(160, contentHeight)
+                clip: true
+                ScrollBar.vertical: ScrollBar {}
+                delegate: TextArea {
+                    required property int index
+                    required property string modelData
+                    objectName: "previewPath-" + group.key + "-" + index
+                    text: modelData
+                    textFormat: Text.PlainText
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.WrapAnywhere
+                    font.pixelSize: root.metadataTypeSize
+                    width: pathsList.width
+                    padding: 0
+                    background: null
+                }
+            }
+        }
+    }
+
     ListModel {
         id: sourceModel
     }
@@ -1100,6 +1150,7 @@ ApplicationWindow {
             }
 
             ScrollView {
+                objectName: "editorScrollView"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 contentWidth: availableWidth
@@ -1486,19 +1537,52 @@ ApplicationWindow {
                 }
             }
 
-            ListView {
-                id: previewList
-                visible: count > 0
-                model: backupSetController.previewIncluded
+            ColumnLayout {
+                objectName: "backupPreview"
+                visible: backupSetController.previewAvailable
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(150, contentHeight)
-                clip: true
-                delegate: Label {
-                    required property string modelData
-                    text: modelData
+                spacing: 12
+
+                Label {
+                    text: qsTr("Backup preview")
+                    font.pixelSize: root.sectionTitleSize
+                    font.weight: Font.DemiBold
+                    color: root.accentColor
+                }
+
+                Label {
+                    text: qsTr("Review this selection before backing up. Preview does not save settings, run a backup, or enable scheduling. Only included files will be attempted; skipped and missing paths will not be backed up.")
                     font.pixelSize: root.metadataTypeSize
-                    elide: Text.ElideMiddle
-                    width: previewList.width
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                PreviewGroup {
+                    key: "included"
+                    heading: qsTr("Included")
+                    emptyText: qsTr("No files will be backed up from this selection.")
+                    paths: backupSetController.previewIncluded
+                }
+
+                PreviewGroup {
+                    key: "excluded"
+                    heading: qsTr("Excluded")
+                    emptyText: qsTr("No paths matched the exclusions.")
+                    paths: backupSetController.previewExcluded
+                }
+
+                PreviewGroup {
+                    key: "skipped"
+                    heading: qsTr("Skipped")
+                    emptyText: qsTr("No unreadable or unsupported paths were skipped.")
+                    paths: backupSetController.previewSkipped
+                }
+
+                PreviewGroup {
+                    key: "missing"
+                    heading: qsTr("Missing")
+                    emptyText: qsTr("No source paths are missing.")
+                    paths: backupSetController.previewMissing
                 }
             }
 

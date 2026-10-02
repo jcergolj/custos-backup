@@ -47,6 +47,13 @@ TestCase {
         backupSetController.refreshCount = 0
         backupSetController.importedPath = ""
         backupSetController.exportedPath = ""
+        backupSetController.previewAvailable = false
+        backupSetController.previewCount = 0
+        backupSetController.saveCount = 0
+        backupSetController.previewIncluded = []
+        backupSetController.previewExcluded = []
+        backupSetController.previewSkipped = []
+        backupSetController.previewMissing = []
         backupSetController.importSucceeds = true
         backupSetController.recentBackups = ["Photos\nNo backup run yet", "Documents\nsucceeded"]
         backupSetController.recentBackupSetIds = ["photos-id", "documents-id"]
@@ -677,6 +684,90 @@ TestCase {
         mouseClick(close)
         tryCompare(app, "showEditor", false)
         compare(backupLauncher.launchedId, "")
+    }
+
+    function test_previewDistinguishesAllGroupsWithoutRunningOrSaving_data() {
+        return [
+            { tag: "mixed results", included: ["/safe/notes.txt"], excluded: ["/safe/cache/output.txt"],
+                skipped: ["/safe/link"], missing: ["/safe/missing"] },
+            { tag: "only skipped and missing", included: [], excluded: [],
+                skipped: ["/safe/unreadable"], missing: ["/safe/missing"] },
+            { tag: "empty selection", included: [], excluded: [], skipped: [], missing: [] }
+        ]
+    }
+
+    function test_previewDistinguishesAllGroupsWithoutRunningOrSaving(data) {
+        mouseClick(openMenu(0).itemAt(0))
+        compare(control("backupPreview").visible, false)
+        backupSetController.previewIncluded = data.included
+        backupSetController.previewExcluded = data.excluded
+        backupSetController.previewSkipped = data.skipped
+        backupSetController.previewMissing = data.missing
+        control("scheduleFrequency").currentIndex = 1
+        waitForRendering(app.contentItem)
+        const scroll = control("editorScrollView").contentItem
+        tryVerify(function () { return scroll.contentHeight > scroll.height })
+        scroll.contentY = scroll.contentHeight - scroll.height
+        waitForRendering(app.contentItem)
+        const previewButton = control("previewBackupSetButton")
+        const position = previewButton.mapToItem(app.contentItem, 0, 0)
+        verify(position.y >= 0 && position.y + previewButton.height <= app.height,
+            "Preview button outside viewport: " + position.y + ", scroll: " + scroll.contentY)
+        mouseClick(previewButton)
+        compare(backupSetController.previewCount, 1)
+        tryCompare(control("backupPreview"), "visible", true)
+        for (const key of ["included", "excluded", "skipped", "missing"]) {
+            const paths = data[key]
+            const group = control("previewGroup-" + key)
+            compare(group.visible, true)
+            compare(group.title, key[0].toUpperCase() + key.slice(1) + " (" + paths.length + ")")
+            const list = control("previewPaths-" + key)
+            compare(list.count, paths.length)
+            compare(list.visible, paths.length > 0)
+            const empty = control("previewEmpty-" + key)
+            compare(empty.visible, paths.length === 0)
+            verify(empty.text.length > 0)
+            if (paths.length > 0) {
+                tryVerify(function () { return list.itemAtIndex(0) !== null })
+                const path = list.itemAtIndex(0)
+                compare(path.text, paths[0])
+                compare(path.textFormat, Text.PlainText)
+                compare(path.readOnly, true)
+                compare(path.selectByMouse, true)
+            }
+        }
+        compare(backupSetController.previewCount, 1)
+        compare(backupSetController.saveCount, 0)
+        compare(backupLauncher.launchedId, "")
+        compare(backupScheduler.enableCount, 0)
+        compare(resourceUsage.savedIndex, -2)
+        if (data.included.length === 0) {
+            compare(control("previewEmpty-included").text, "No files will be backed up from this selection.")
+        }
+    }
+
+    function test_previewFullPathsWrapAndEveryResultCanBeInspected() {
+        app.width = app.minimumWidth
+        mouseClick(openMenu(0).itemAt(0))
+        const paths = []
+        for (let index = 0; index < 40; ++index) {
+            paths.push("/safe/" + "long-folder-name/".repeat(12) + "file-" + index + "<notes>.txt")
+        }
+        backupSetController.previewMissing = paths
+        backupSetController.preview()
+        waitForRendering(app.contentItem)
+        const list = control("previewPaths-missing")
+        tryCompare(list, "count", 40)
+        tryVerify(function () { return list.contentHeight > list.height })
+        list.positionViewAtIndex(39, ListView.End)
+        tryVerify(function () { return list.itemAtIndex(39) !== null })
+        const last = list.itemAtIndex(39)
+        compare(last.text, paths[39])
+        compare(last.wrapMode, TextEdit.WrapAnywhere)
+        verify(last.height > 2 * last.font.pixelSize)
+        verify(last.width <= list.width)
+        last.selectAll()
+        compare(last.selectedText, paths[39])
     }
 
     function test_keyboardMenuNavigationAndEscape() {

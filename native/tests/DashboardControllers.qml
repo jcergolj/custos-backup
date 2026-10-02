@@ -76,6 +76,9 @@ QtObject {
         property var recentBackups: ["Photos\nNo backup run yet", "Documents\nsucceeded"]
         property var recentBackupSetIds: ["photos-id", "documents-id"]
         property var recentBackupTimestamps: ["", "01/10/2026 10:00:00"]
+        property bool previewAvailable: false
+        property int previewCount: 0
+        property int saveCount: 0
         property var previewIncluded: []
         property var previewExcluded: []
         property var previewSkipped: []
@@ -91,7 +94,10 @@ QtObject {
         signal currentSetChanged()
         signal statusChanged(string status)
         signal failed(string error)
-        onCurrentIndexChanged: currentSetChanged()
+        onCurrentIndexChanged: {
+            previewAvailable = false
+            currentSetChanged()
+        }
         function removeSet(index) { removedIndex = index }
         function removeCurrentSet() { removeSet(currentIndex) }
         function addSet() {
@@ -100,11 +106,11 @@ QtObject {
             setNames = setNames.concat(["New set"])
             currentIndex = setNames.length - 1
         }
-        function preview() {}
+        function preview() { previewCount++; previewAvailable = true }
         function recentBackupFolderPath(setId) {
             return setIds.indexOf(setId) >= 0 ? "/backups/" + setId : ""
         }
-        function save() { return true }
+        function save() { saveCount++; return true }
         function importSets(path) { importedPath = path; return importSucceeds }
         function exportSets(path) { exportedPath = path; return true }
         function confirmCleanup() { return true }
