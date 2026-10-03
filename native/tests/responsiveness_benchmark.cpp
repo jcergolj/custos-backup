@@ -213,10 +213,14 @@ private slots:
         root->setProperty("showRestore", true);
         auto list = item("restoreFilesList");
         QVERIFY(list);
-        auto scroll = root->findChild<QObject *>("dashboardScrollView");
+        auto scroll = root->findChild<QObject *>("restoreScrollView");
         QVERIFY(scroll);
         auto content = qobject_cast<QQuickItem *>(scroll->property("contentItem").value<QObject *>());
         QVERIFY(content);
+        auto dashboardScroll = root->findChild<QObject *>("dashboardScrollView");
+        QVERIFY(dashboardScroll);
+        auto dashboardContent = qobject_cast<QQuickItem *>(dashboardScroll->property("contentItem").value<QObject *>());
+        QVERIFY(dashboardContent);
         content->setProperty("contentY", list->mapToItem(content, QPointF()).y());
         QTest::qWait(50);
         QVariantList selection;
@@ -260,7 +264,7 @@ private slots:
             ensureRestore();
             root->setProperty("showEditor", false);
             root->setProperty("showRestore", false);
-            content->setProperty("contentY", 0);
+            dashboardContent->setProperty("contentY", 0);
             QTest::qWait(20);
             click(item("setActions-0"));
             QObject *menu = findControl(root.data(), "setMenu-0");
@@ -299,7 +303,7 @@ private slots:
             for (int i = 0; i < repetitions; ++i) {
                 root->setProperty("showEditor", false);
                 root->setProperty("showRestore", false);
-                content->setProperty("contentY", 0);
+                dashboardContent->setProperty("contentY", 0);
                 QTest::qWait(20);
                 ensureRestore();
                 auto restoreButton = item("restore-0");

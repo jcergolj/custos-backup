@@ -21,7 +21,10 @@ target; `omacustos_add_test` registers tests against the appropriate target.
 `Dashboard.qml` presents saved sets and recent runs and emits navigation requests.
 `BackupEditor.qml` owns its draft fields and controller synchronization.
 `RestorePanel.qml` owns file selection, destination, and selection reconciliation
-across copy refreshes; completion resets the panel and returns to the dashboard.
+across copy refreshes. Restore opens in a dedicated scrollable screen, like the
+backup editor; closing it preserves its state, and completion resets the panel
+and returns to the dashboard. The top-right three-dot menu contains backup-set
+import and export actions.
 These components receive controllers and `UiStyle` explicitly. `ActionButton`
 and `PreviewGroup` provide shared presentation, inheriting the window's live
 palette. Window state aliases and existing object/accessibility identifiers keep

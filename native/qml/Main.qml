@@ -15,7 +15,6 @@ ApplicationWindow {
     property bool showEditor: false
     property bool showRestore: false
     property string notificationMessage: ""
-    property real dashboardReturnY: 0
 
     // Keep the window's dashboard/test API while state lives with its presentation.
     property alias selectedRestoreIndexes: restorePanel.selectedIndexes
@@ -84,6 +83,8 @@ ApplicationWindow {
     }
 
     function createNewSet() {
+        rememberRestoreContext()
+        showRestore = false
         backupSetController.addSet()
         showAdvanced = false
         showEditor = true
@@ -91,6 +92,8 @@ ApplicationWindow {
     }
 
     function editSet(index) {
+        rememberRestoreContext()
+        showRestore = false
         backupSetController.currentIndex = index
         showEditor = true
         Qt.callLater(function () { backupEditor.focusName() })
@@ -106,12 +109,15 @@ ApplicationWindow {
         openRestoreContext(backupSetController.recentBackupFolderPath(setId), setId)
     }
 
-    function openRestoreContext(folder, setId) {
+    function rememberRestoreContext() {
         if (showRestore) {
-            restorePanel.screenScrollY = dashboardScrollView.contentItem.contentY
-        } else {
-            dashboardReturnY = dashboardScrollView.contentItem.contentY
+            restorePanel.screenScrollY = restoreScrollView.contentItem.contentY
+            restorePanel.rememberContext()
         }
+    }
+
+    function openRestoreContext(folder, setId) {
+        rememberRestoreContext()
         restorePanel.activateContext(folder, setId)
         showEditor = false
         showRestore = true
@@ -119,10 +125,8 @@ ApplicationWindow {
         Qt.callLater(function () {
             if (!root || !root.showRestore || root.showEditor
                 || restoreController.backupId !== setId || restoreController.backupFolder !== folder) return
-            dashboardScrollView.contentItem.contentY = restorePanel.screenScrollY >= 0
-                ? restorePanel.screenScrollY : Math.max(0,
-                    restorePanel.mapToItem(dashboardScrollView.contentItem, 0, 0).y)
-            restorePanel.focusSearch(dashboardScrollView)
+            restoreScrollView.contentItem.contentY = Math.max(0, restorePanel.screenScrollY)
+            restorePanel.focusSearch(restoreScrollView)
         })
     }
 
@@ -393,25 +397,36 @@ ApplicationWindow {
             }
 
             ActionButton {
+                id: backupSetsMenuButton
                 style: uiStyle
-                objectName: "importSetsButton"
-                text: qsTr("Import")
-                Layout.preferredHeight: 36
-                enabled: !recentBackupCopies.busy
+                objectName: "backupSetsMenuButton"
+                text: "⋯"
+                Layout.preferredWidth: 40
+                Accessible.name: qsTr("Backup set options")
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("Load backup sets from a JSON export")
-                onClicked: importSetsDialog.open()
-            }
+                ToolTip.text: Accessible.name
+                onClicked: backupSetsMenu.open()
 
-            ActionButton {
-                style: uiStyle
-                objectName: "exportSetsButton"
-                text: qsTr("Export")
-                Layout.preferredHeight: 36
-                enabled: backupSetController.setNames.length > 0
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Export saved backup sets to a JSON file")
-                onClicked: exportSetsDialog.open()
+                Menu {
+                    id: backupSetsMenu
+                    objectName: "backupSetsMenu"
+                    x: backupSetsMenuButton.width - width
+                    y: backupSetsMenuButton.height
+
+                    MenuItem {
+                        objectName: "importSetsButton"
+                        text: qsTr("Import")
+                        enabled: !recentBackupCopies.busy
+                        onTriggered: importSetsDialog.open()
+                    }
+
+                    MenuItem {
+                        objectName: "exportSetsButton"
+                        text: qsTr("Export")
+                        enabled: backupSetController.setNames.length > 0
+                        onTriggered: exportSetsDialog.open()
+                    }
+                }
             }
         }
 
@@ -506,6 +521,8 @@ ApplicationWindow {
                     if (restoreController.restoring) {
                         root.openRestoreContext(restoreController.restoreBackupFolder, restoreController.restoreBackupId)
                     } else {
+                        root.rememberRestoreContext()
+                        root.showRestore = false
                         root.showEditor = false
                     }
                 }
@@ -523,7 +540,7 @@ ApplicationWindow {
         }
 
         StackLayout {
-            currentIndex: root.showEditor ? 1 : 0
+            currentIndex: root.showEditor ? 1 : root.showRestore ? 2 : 0
             Layout.fillWidth: true
             Layout.fillHeight: true
 
@@ -559,23 +576,6 @@ ApplicationWindow {
                             backupDetailsDialog.open()
                         }
                     }
-
-                    RestorePanel {
-                        id: restorePanel
-                        style: uiStyle
-                        controller: restoreController
-                        visible: root.showRestore
-                        onCompleted: {
-                            root.showRestore = false
-                            dashboardScrollView.contentItem.contentY = 0
-                        }
-                        onCloseRequested: {
-                            restorePanel.screenScrollY = dashboardScrollView.contentItem.contentY
-                            restorePanel.rememberContext()
-                            root.showRestore = false
-                            dashboardScrollView.contentItem.contentY = root.dashboardReturnY
-                        }
-                    }
                 }
             }
 
@@ -585,6 +585,35 @@ ApplicationWindow {
                 controller: backupSetController
                 resources: resourceUsage
                 onCloseRequested: root.showEditor = false
+            }
+
+            ScrollView {
+                id: restoreScrollView
+                objectName: "restoreScrollView"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+
+                ColumnLayout {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: root.contentPadding
+                    anchors.rightMargin: root.contentPadding
+
+                    RestorePanel {
+                        id: restorePanel
+                        style: uiStyle
+                        controller: restoreController
+                        onCompleted: {
+                            root.showRestore = false
+                            dashboardScrollView.contentItem.contentY = 0
+                        }
+                        onCloseRequested: {
+                            root.rememberRestoreContext()
+                            root.showRestore = false
+                        }
+                    }
+                }
             }
         }
     }

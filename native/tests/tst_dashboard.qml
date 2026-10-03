@@ -321,6 +321,11 @@ TestCase {
         compare(restoreController.discoveredRoot, "/backups/documents-id")
         compare(restoreController.discoveredSetId, "documents-id")
         compare(app.showRestore, true)
+        compare(control("dashboardScrollView").visible, false)
+        compare(control("editorScrollView").visible, false)
+        compare(control("restoreScrollView").visible, true)
+        compare(control("closeRestoreButton").text, "×")
+        compare(control("closeRestoreButton").Accessible.name, "Close restore")
         compare(control("recentSummary-1").text, "Documents · succeeded · 01/10/2026 10:00:00")
     }
 
@@ -369,6 +374,8 @@ TestCase {
         verify(control("restore-1").enabled)
         mouseClick(control("closeRestoreButton"))
         compare(app.showRestore, false)
+        compare(control("dashboardScrollView").visible, true)
+        compare(control("restoreScrollView").visible, false)
         verify(control("activeRestoreProgress").visible)
         mouseClick(control("returnToRestoreButton"))
         compare(app.showRestore, true)
@@ -513,10 +520,6 @@ TestCase {
         restoreController.copies = ["Computer / Documents / copy-id"]
         restoreController.entries = ["/safe/documents/notes.txt", "/safe/documents/photo.jpg"]
         restoreController.verified = true
-        const scroll = control("dashboardScrollView").contentItem
-        waitForRendering(app.contentItem)
-        const files = control("restoreFilesList")
-        scroll.contentY = files.mapToItem(scroll.contentItem, 0, 0).y
         waitForRendering(app.contentItem)
     }
 
@@ -525,9 +528,9 @@ TestCase {
         const start = control("startRestoreButton")
         const destination = control("restoreDestinationField")
         compare(start.text, "Start restore")
-        compare(start.font.weight, control("importSetsButton").font.weight)
-        compare(start.font.pixelSize, control("importSetsButton").font.pixelSize)
-        compare(control("chooseRestoreDestinationButton").font.weight, control("importSetsButton").font.weight)
+        compare(start.font.weight, control("backupSetsMenuButton").font.weight)
+        compare(start.font.pixelSize, control("backupSetsMenuButton").font.pixelSize)
+        compare(control("chooseRestoreDestinationButton").font.weight, control("backupSetsMenuButton").font.weight)
         compare(start.enabled, false)
         compare(destination.text, "")
         verify(control("restoreInstructions").text.indexOf("tick the files") >= 0)
@@ -546,7 +549,7 @@ TestCase {
         const startPosition = start.mapToItem(control("restorePanel"), 0, 0)
         const destinationPosition = destination.mapToItem(control("restorePanel"), 0, destination.height)
         verify(startPosition.y > destinationPosition.y)
-        const scroll = control("dashboardScrollView").contentItem
+        const scroll = control("restoreScrollView").contentItem
         scroll.contentY = scroll.contentHeight - scroll.height
         waitForRendering(app.contentItem)
         mouseClick(start)
@@ -564,7 +567,7 @@ TestCase {
         restoreController.restoreSucceeds = false
         const destination = control("restoreDestinationField")
         destination.text = "/safe/restore"
-        const scroll = control("dashboardScrollView").contentItem
+        const scroll = control("restoreScrollView").contentItem
         scroll.contentY = scroll.contentHeight - scroll.height
         waitForRendering(app.contentItem)
         mouseClick(control("startRestoreButton"))
@@ -778,9 +781,40 @@ TestCase {
         compare(app.showEditor, false)
     }
 
-    function test_actionButtonsMatchImportAndExportAppearance() {
-        const reference = control("importSetsButton")
-        for (const name of ["exportSetsButton", "newBackupSetButton", "setActions-0",
+    function test_backupSetOptionsOpenBelowTopRightButtonAndDismissWithEscape() {
+        const button = control("backupSetsMenuButton")
+        const menu = control("backupSetsMenu")
+        compare(button.text, "⋯")
+        compare(button.Accessible.name, "Backup set options")
+        compare(menu.visible, false)
+        const position = button.mapToItem(app.contentItem, 0, 0)
+        compare(position.x + button.width, app.width - app.contentPadding)
+        button.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        tryCompare(menu, "opened", true)
+        compare(menu.itemAt(0), control("importSetsButton"))
+        compare(menu.itemAt(1), control("exportSetsButton"))
+        const menuTop = menu.contentItem.mapToItem(app.contentItem, 0, 0)
+        verify(menuTop.y >= position.y + button.height)
+        verify(Math.abs(menuTop.x + menu.contentItem.width - position.x - button.width) < 16)
+        keyClick(Qt.Key_Escape)
+        tryCompare(menu, "visible", false)
+        tryCompare(button, "activeFocus", true)
+        mouseClick(button)
+        tryCompare(menu, "opened", true)
+        mouseClick(menu.itemAt(0))
+        tryCompare(control("importSetsDialog"), "visible", true)
+        control("importSetsDialog").reject()
+        mouseClick(button)
+        tryCompare(menu, "opened", true)
+        mouseClick(menu.itemAt(1))
+        tryCompare(control("exportSetsDialog"), "visible", true)
+        control("exportSetsDialog").reject()
+    }
+
+    function test_actionButtonsMatchOverflowButtonAppearance() {
+        const reference = control("backupSetsMenuButton")
+        for (const name of ["newBackupSetButton", "setActions-0",
                             "openFolder-1", "restore-1", "recentActions-1"]) {
             const action = control(name)
             verify(action instanceof Button, name + " must use the same button control")

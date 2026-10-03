@@ -157,8 +157,12 @@ GroupBox {
         ActionButton {
             style: panel.style
             objectName: "closeRestoreButton"
-            text: qsTr("Back to dashboard")
+            text: "×"
+            Layout.preferredWidth: 36
             Layout.alignment: Qt.AlignRight
+            Accessible.name: qsTr("Close restore")
+            ToolTip.visible: hovered
+            ToolTip.text: Accessible.name
             onClicked: panel.closeRequested()
         }
 
