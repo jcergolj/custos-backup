@@ -1,5 +1,9 @@
 #include <QSignalSpy>
 #include <QTest>
+#include <QFile>
+#include <QSemaphore>
+#include <QTemporaryDir>
+#include <atomic>
 
 #include "../src/protonfolderbrowser.h"
 
@@ -19,6 +23,26 @@ public:
     }
 };
 
+class BlockingFolderRunner final : public ProcessRunner
+{
+public:
+    QString blockedPath;
+    QSemaphore entered;
+    QSemaphore proceed;
+    std::atomic_int calls {0};
+
+    ProcessOutput run(const QStringList &arguments) override
+    {
+        ++calls;
+        if (arguments.last() == blockedPath) {
+            entered.release();
+            // Bound the fixture even if an assertion fails before releasing it.
+            if (!proceed.tryAcquire(1, 5000)) return {1, {}, QStringLiteral("Fixture timeout")};
+        }
+        return {0, QStringLiteral(R"({"type":"folder","uid":"volume~node","deprecatedShareId":"share"})"), {}};
+    }
+};
+
 class ProtonFolderBrowserTest final : public QObject
 {
     Q_OBJECT
@@ -28,6 +52,12 @@ private slots:
     void reportsMetadataAndCommandFailures_data();
     void reportsMetadataAndCommandFailures();
     void rejectsUnsafePathsWithoutRunningCommands();
+    void deepCopyUsesOnlyTargetAndRootMetadata();
+    void persistsLinksAndOpensImmediatelyAfterRestart();
+    void prefetchJoinsOpenWithoutDuplicateLookup();
+    void backgroundLookupDoesNotDelayOtherLinks();
+    void ignoresMalformedAndForeignCachedUrls();
+    void fallsBackToNearerAncestorShare();
 };
 
 void ProtonFolderBrowserTest::resolvesAncestorShareForTargetFolder()
@@ -55,6 +85,126 @@ void ProtonFolderBrowserTest::resolvesAncestorShareForTargetFolder()
         {QStringLiteral("filesystem"), QStringLiteral("info"), QStringLiteral("-j"), QStringLiteral("/my-files/backups")},
         {QStringLiteral("filesystem"), QStringLiteral("info"), QStringLiteral("-j"), QStringLiteral("/my-files")},
     }));
+}
+
+void ProtonFolderBrowserTest::deepCopyUsesOnlyTargetAndRootMetadata()
+{
+    FolderRunner runner;
+    runner.responses = {
+        {0, QStringLiteral(R"({"type":"folder","uid":"volume~copy-node"})"), {}},
+        {0, QStringLiteral(R"({"type":"folder","uid":"volume~root","deprecatedShareId":"share"})"), {}},
+    };
+    const QString path = QStringLiteral("/my-files/backups/computer/documents/copy-id");
+    const auto result = ProtonFolderLink::resolve(runner, path);
+    QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+    QCOMPARE(result.url.path(), QStringLiteral("/share/folder/copy-node"));
+    QCOMPARE(runner.requests.size(), 2);
+    QCOMPARE(runner.requests.first().last(), path);
+    QCOMPARE(runner.requests.last().last(), QStringLiteral("/my-files"));
+}
+
+void ProtonFolderBrowserTest::persistsLinksAndOpensImmediatelyAfterRestart()
+{
+    QTemporaryDir state;
+    const QString cachePath = state.filePath(QStringLiteral("links.json"));
+    const QString path = QStringLiteral("/my-files/backups/copy");
+    FolderRunner runner;
+    runner.responses = {{0, QStringLiteral(R"({"type":"folder","uid":"volume~copy==","deprecatedShareId":"share=="})"), {}}};
+    {
+        ProtonFolderBrowser browser(runner, cachePath);
+        QSignalSpy opened(&browser, &ProtonFolderBrowser::folderResolved);
+        browser.openFolder(path);
+        QTRY_COMPARE(opened.count(), 1);
+    }
+    QCOMPARE(runner.requests.size(), 1);
+    FolderRunner offlineRunner;
+    ProtonFolderBrowser restarted(offlineRunner, cachePath);
+    QSignalSpy opened(&restarted, &ProtonFolderBrowser::folderResolved);
+    QSignalSpy busy(&restarted, &ProtonFolderBrowser::busyChanged);
+    restarted.openFolder(path);
+    // Synchronous delivery proves that no CLI task/event-loop turn is needed.
+    QCOMPARE(opened.count(), 1);
+    QCOMPARE(opened.first().first().toUrl().path(), QStringLiteral("/share==/folder/copy=="));
+    QVERIFY(busy.isEmpty());
+    QVERIFY(offlineRunner.requests.isEmpty());
+}
+
+void ProtonFolderBrowserTest::prefetchJoinsOpenWithoutDuplicateLookup()
+{
+    QTemporaryDir state;
+    const QString cachePath = state.filePath(QStringLiteral("links.json"));
+    BlockingFolderRunner runner;
+    runner.blockedPath = QStringLiteral("/my-files/backups/copy");
+    ProtonFolderBrowser browser(runner, cachePath);
+    QSignalSpy opened(&browser, &ProtonFolderBrowser::folderResolved);
+    browser.prefetchFolders({runner.blockedPath, runner.blockedPath});
+    QTRY_VERIFY(runner.entered.available() > 0);
+    QVERIFY(!browser.busy());
+    QVERIFY(opened.isEmpty());
+    browser.openFolder(runner.blockedPath);
+    QVERIFY(browser.busy());
+    runner.proceed.release();
+    QTRY_COMPARE(opened.count(), 1);
+    QVERIFY(!browser.busy());
+    QCOMPARE(runner.calls.load(), 1);
+    browser.openFolder(runner.blockedPath);
+    QCOMPARE(opened.count(), 2);
+    QCOMPARE(runner.calls.load(), 1);
+}
+
+void ProtonFolderBrowserTest::backgroundLookupDoesNotDelayOtherLinks()
+{
+    QTemporaryDir state;
+    const QString cachePath = state.filePath(QStringLiteral("links.json"));
+    BlockingFolderRunner runner;
+    runner.blockedPath = QStringLiteral("/my-files/backups/slow-copy");
+    ProtonFolderBrowser browser(runner, cachePath);
+    QSignalSpy opened(&browser, &ProtonFolderBrowser::folderResolved);
+    browser.prefetchFolders({runner.blockedPath});
+    QTRY_VERIFY(runner.entered.available() > 0);
+    browser.openFolder(QStringLiteral("/my-files/backups/other-copy"));
+    QTRY_COMPARE(opened.count(), 1);
+    QCOMPARE(runner.calls.load(), 2);
+    browser.openFolder(QStringLiteral("/my-files/backups/other-copy"));
+    QCOMPARE(opened.count(), 2);
+    QCOMPARE(runner.calls.load(), 2);
+    runner.proceed.release();
+}
+
+void ProtonFolderBrowserTest::ignoresMalformedAndForeignCachedUrls()
+{
+    QTemporaryDir state;
+    const QString cachePath = state.filePath(QStringLiteral("links.json"));
+    QFile cache(cachePath);
+    QVERIFY(cache.open(QIODevice::WriteOnly));
+    cache.write(R"({"/my-files/copy":"https://example.com/share/folder/node"})");
+    cache.close();
+    QVERIFY(ProtonFolderLink::cached(cachePath, QStringLiteral("/my-files/copy")).isEmpty());
+    FolderRunner runner;
+    runner.responses = {{0, QStringLiteral(R"({"type":"folder","uid":"volume~node","deprecatedShareId":"share"})"), {}}};
+    auto resolved = ProtonFolderLink::resolve(runner, QStringLiteral("/my-files/copy"), cachePath);
+    QVERIFY(resolved.error.isEmpty());
+    QCOMPARE(resolved.url.host(), QStringLiteral("drive.proton.me"));
+    QCOMPARE(runner.requests.size(), 1);
+    QVERIFY(cache.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    cache.write("{");
+    cache.close();
+    QVERIFY(ProtonFolderLink::cached(cachePath, QStringLiteral("/my-files/copy")).isEmpty());
+}
+
+void ProtonFolderBrowserTest::fallsBackToNearerAncestorShare()
+{
+    FolderRunner runner;
+    runner.responses = {
+        {0, QStringLiteral(R"({"type":"folder","uid":"volume~copy-node"})"), {}},
+        {0, QStringLiteral(R"({"type":"folder","uid":"volume~root"})"), {}},
+        {0, QStringLiteral(R"({"type":"folder","uid":"volume~parent","deprecatedShareId":"parent-share"})"), {}},
+    };
+    const auto result = ProtonFolderLink::resolve(runner, QStringLiteral("/my-files/backups/copy"));
+    QVERIFY(result.error.isEmpty());
+    QCOMPARE(result.url.path(), QStringLiteral("/parent-share/folder/copy-node"));
+    QCOMPARE(runner.requests.size(), 3);
+    QCOMPARE(runner.requests.last().last(), QStringLiteral("/my-files/backups"));
 }
 
 void ProtonFolderBrowserTest::reportsMetadataAndCommandFailures_data()

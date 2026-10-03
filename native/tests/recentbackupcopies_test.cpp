@@ -19,11 +19,13 @@ public:
     explicit CopyProvider(const QString &root) : local(root) {}
     LocalProvider local;
     QStringList trashed;
+    QStringList downloaded;
+    QStringList listed;
     bool upload(const QString &a, const QString &b, QString *e) override { return local.upload(a, b, e); }
     bool ensureDirectory(const QString &p, QString *e) override { return local.ensureDirectory(p, e); }
-    bool download(const QString &a, const QString &b, QString *e) override { return local.download(a, b, e); }
+    bool download(const QString &a, const QString &b, QString *e) override { downloaded.append(a); return local.download(a, b, e); }
     bool inspect(const QString &p, RemoteFile *f, QString *e) override { return local.inspect(p, f, e); }
-    bool list(const QString &p, QVector<RemoteItem> *i, QString *e) override { return local.list(p, i, e); }
+    bool list(const QString &p, QVector<RemoteItem> *i, QString *e) override { listed.append(p); return local.list(p, i, e); }
     bool trash(const QString &p, QString *e) override { trashed.append(p); return local.trash(p, e); }
     bool permanentlyDelete(const QString &, QString *) override { return false; }
 };
@@ -72,6 +74,8 @@ private slots:
     void changedRunPointerPreventsDeletion();
     void foreignManifestsAndUnsafePathsCannotBeDeleted();
     void runningWorkerPreventsDeletion();
+    void browsingRecordedCopyNeedsNoManifestOrWorkerLock();
+    void browsingRejectsUnsafeRecordedPath();
 };
 
 void RecentBackupCopiesTest::confirmationDeletesOnlyItsExactCopyAndKeepsTheSet()
@@ -140,10 +144,60 @@ void RecentBackupCopiesTest::persistedCopyPathControlsBrowsingAndDeletion()
     copies.openCopy(fixture.set.id);
     QTRY_COMPARE(opened.count(), 1);
     QCOMPARE(opened.first().first().toString(), fixture.path(QStringLiteral("pointed-copy")));
+    QVERIFY(fixture.provider.downloaded.isEmpty());
     copies.requestDelete(fixture.set.id);
     QTRY_COMPARE(warning.count(), 1);
     QCOMPARE(warning.first().at(1).toString(), opened.first().first().toString());
     QVERIFY(fixture.provider.trashed.isEmpty());
+}
+
+void RecentBackupCopiesTest::browsingRecordedCopyNeedsNoManifestOrWorkerLock()
+{
+    CopyFixture fixture;
+    QVERIFY(fixture.prepare());
+    BackupRunStore runs(fixture.runPath);
+    QVERIFY(runs.load());
+    runs.find(fixture.set.id)->remoteCopyPath = fixture.path(QStringLiteral("recorded-copy"));
+    QVERIFY(runs.save());
+    // No remote folder or manifest exists. Browsing passes the known path to
+    // the URL resolver; deletion must still verify the remote manifest.
+    QLockFile workerLock(fixture.configPath + QStringLiteral(".worker.lock"));
+    QLockFile runLock(fixture.runPath + QStringLiteral(".lock"));
+    QVERIFY(workerLock.tryLock(0));
+    QVERIFY(runLock.tryLock(0));
+    RecentBackupCopies copies(fixture.provider, fixture.configPath, QStringLiteral("computer"));
+    QSignalSpy opened(&copies, &RecentBackupCopies::folderResolved);
+    QSignalSpy failed(&copies, &RecentBackupCopies::failed);
+    copies.openCopy(fixture.set.id);
+    QTRY_COMPARE(opened.count(), 1);
+    QCOMPARE(opened.first().first().toString(), fixture.path(QStringLiteral("recorded-copy")));
+    QVERIFY(failed.isEmpty());
+    QVERIFY(fixture.provider.downloaded.isEmpty());
+    QVERIFY(fixture.provider.listed.isEmpty());
+    workerLock.unlock();
+    runLock.unlock();
+    copies.requestDelete(fixture.set.id);
+    QTRY_COMPARE(failed.count(), 1);
+    QCOMPARE(fixture.provider.downloaded.size(), 1);
+    QVERIFY(fixture.provider.trashed.isEmpty());
+}
+
+void RecentBackupCopiesTest::browsingRejectsUnsafeRecordedPath()
+{
+    CopyFixture fixture;
+    QVERIFY(fixture.prepare());
+    BackupRunStore runs(fixture.runPath);
+    QVERIFY(runs.load());
+    runs.find(fixture.set.id)->remoteCopyPath = fixture.path(QStringLiteral("../other-copy"));
+    QVERIFY(runs.save());
+    RecentBackupCopies copies(fixture.provider, fixture.configPath, QStringLiteral("computer"));
+    QSignalSpy opened(&copies, &RecentBackupCopies::folderResolved);
+    QSignalSpy failed(&copies, &RecentBackupCopies::failed);
+    copies.openCopy(fixture.set.id);
+    QTRY_COMPARE(failed.count(), 1);
+    QVERIFY(opened.isEmpty());
+    QVERIFY(fixture.provider.downloaded.isEmpty());
+    QVERIFY(fixture.provider.listed.isEmpty());
 }
 
 void RecentBackupCopiesTest::changedRunPointerPreventsDeletion()

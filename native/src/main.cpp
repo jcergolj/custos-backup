@@ -41,13 +41,27 @@ int main(int argc, char *argv[])
         protonBinary
     );
     ProtonProvider restoreProvider(restoreRunner);
-    ProtonFolderBrowser protonFolderBrowser(restoreRunner);
+    ProtonFolderBrowser protonFolderBrowser(restoreRunner, ProtonFolderLink::cachePath(configPath));
     RecentBackupCopies recentBackupCopies(restoreProvider, configPath, QSysInfo::machineHostName());
     BackupRestoreController restoreController(backupEngine, &restoreProvider);
     ProtonAuthController protonAuth(protonBinary);
     ThemeColors themeColors;
     ResourceUsage resourceUsage;
     BackupScheduler backupScheduler(configPath);
+    const auto prefetchBrowserLinks = [&] {
+        protonFolderBrowser.prefetchFolders(backupSetController.recentBackupCopyPaths());
+    };
+    QObject::connect(&backupSetController, &BackupSetController::dashboardChanged,
+        &protonFolderBrowser, prefetchBrowserLinks);
+    bool browserLinksConnected = false;
+    QObject::connect(&protonAuth, &ProtonAuthController::stateChanged, &protonFolderBrowser, [&] {
+        const bool connected = protonAuth.authenticated();
+        if (connected && !browserLinksConnected) {
+            protonFolderBrowser.prefetchFolders(backupSetController.recentBackupCopyPaths(), true);
+        }
+        browserLinksConnected = connected;
+    });
+    prefetchBrowserLinks();
     bool schedulingUpdatePending = false;
     const auto updateScheduling = [&] {
         if (resourceUsage.busy()) {

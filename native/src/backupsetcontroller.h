@@ -94,6 +94,7 @@ public:
     QStringList recentBackups() const;
     QStringList recentBackupSetIds() const;
     QStringList recentBackupTimestamps() const;
+    QStringList recentBackupCopyPaths() const;
     QString dashboardRefreshError() const { return refreshError; }
     bool previewAvailable() const;
     bool previewBusy() const { return previewWorking; }

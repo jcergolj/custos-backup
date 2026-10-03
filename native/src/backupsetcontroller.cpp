@@ -492,6 +492,19 @@ QStringList BackupSetController::recentBackupTimestamps() const
     return cachedRecentTimestamps;
 }
 
+QStringList BackupSetController::recentBackupCopyPaths() const
+{
+    QStringList paths;
+    for (const QString &setId : cachedRecentSetIds) {
+        const BackupRunRecord *record = runStore.find(setId);
+        if (record && record->status != QStringLiteral("running")
+            && record->status != QStringLiteral("copy_deleted") && !record->remoteCopyPath.isEmpty()) {
+            paths.append(record->remoteCopyPath);
+        }
+    }
+    return paths;
+}
+
 QString BackupSetController::recentBackupFolderPath(const QString &setId) const
 {
     for (const BackupSet &set : config.sets) {

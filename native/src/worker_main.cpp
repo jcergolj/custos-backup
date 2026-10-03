@@ -6,6 +6,7 @@
 #include "backupcatalog.h"
 #include "backupecleanup.h"
 #include "protonprovider.h"
+#include "protonfolderlink.h"
 #include "qprocessrunner.h"
 
 #include <QCoreApplication>
@@ -282,6 +283,12 @@ int main(int argc, char *argv[])
         } else {
             runStore.markFailed(record, error, QDateTime::currentDateTime());
             qCritical().noquote() << setIterator->name << error;
+        }
+
+        if (record.result.manifestVerified) {
+            // Prepare navigation while this copy is being finalized. Link
+            // lookup/cache failures must not change the backup's result.
+            ProtonFolderLink::resolve(runner, copyRoot, ProtonFolderLink::cachePath(configPath));
         }
 
         if (!runStore.save(&error)) {

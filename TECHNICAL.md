@@ -38,12 +38,15 @@ OmaCustos stores user state under `~/.config/omacustos`:
 omacustos-backup.json
 omacustos-backup-runs.json
 omacustos-backup-cleanup.json
+omacustos-browser-links.json
 ```
 
 The first file contains named backup configurations. Run history and pending
 cleanup decisions are stored separately. Discovered remote backups are not written into
 the local schedule or backup queue, so reinstall discovery never reactivates an
 old schedule.
+Browser links are an optional, bounded cache of private Proton Drive folder URLs,
+keyed by the exact copy path. Losing this cache only requires resolving links again.
 
 ## Remote Layout
 
@@ -164,13 +167,28 @@ retention gates still apply. Tests inject millisecond timeout policies and use
 a local subprocess fixture for progressing, silent, and failing commands.
 
 Recent-backup browser links open the copy recorded for that run in
-the signed-in Proton Drive web app. OmaCustos resolves the folder's node ID and an
-ancestor's share ID through read-only CLI metadata requests in the background;
-it does not create public sharing links.
+the signed-in Proton Drive web app. Browsing a recorded copy uses its locally saved
+path directly, without downloading its manifest or acquiring worker/run-state locks.
+The worker prepares and caches the private browser URL for manifest-verified copies
+before publishing their final result; a link-lookup failure never changes the backup
+result. The app also prefetches uncached recorded-copy URLs in the background at
+startup and as recent backups change, without opening the browser or showing errors.
+Reconnecting to Proton retries previously failed prefetches.
+Cached links are emitted immediately without a CLI request, including after restart.
+An uncached click joins prefetch for that exact copy or starts its own lookup without
+waiting for another copy's prefetch.
+
+Link resolution uses the folder's node ID and a share ID obtained through read-only
+CLI metadata requests. For the usual `/my-files` layout, it inspects the target and
+the top-level folder directly (at most two commands), rather than walking every
+parent. An ancestor fallback handles metadata that exposes the share only on a
+nearer parent. No public sharing links are created. The cache retains at most 200
+URLs and is merged atomically under a separate lock shared by the GUI and worker.
 
 Runs persist the exact copy folder as `remote_copy_path`. For older run records,
 OmaCustos identifies the newest matching manifest inside that backup's folder and
-remembers its path. Browsing and manual deletion use the same recorded copy.
+remembers its path under the worker/run-state locks. This legacy fallback still
+downloads manifests. Browsing and manual deletion use the same recorded copy.
 Manual deletion requires confirmation of the exact path, rechecks its OmaCustos
 manifest and identity, and moves that copy to Proton Drive Trash. Older copies
 and the backup set remain; the deleted entry disappears from Recent backups.

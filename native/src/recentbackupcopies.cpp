@@ -47,24 +47,25 @@ RecentCopyTarget inspectCopy(BackupProvider &provider, const BackupSet &set, con
 }
 
 RecentCopyTarget resolveCopy(BackupProvider &provider, const QString &configPath, const QString &computer,
-    const QString &setId, const RecentCopyTarget &confirmed)
+    const QString &setId, const RecentCopyTarget &confirmed, bool browse)
 {
     RecentCopyTarget result;
     result.setId = setId;
     QLockFile workerLock(configPath + QStringLiteral(".worker.lock"));
-    if (!workerLock.tryLock(0)) {
+    if (!browse && !workerLock.tryLock(0)) {
         result.error = QStringLiteral("Wait for the running backup to finish before managing its copies.");
         return result;
     }
     const QString runPath = QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("omacustos-backup-runs.json"));
     QLockFile runLock(runPath + QStringLiteral(".lock"));
-    if (!runLock.tryLock(0)) {
+    if (!browse && !runLock.tryLock(0)) {
         result.error = QStringLiteral("A backup queue update is already in progress.");
         return result;
     }
     BackupConfig config;
     BackupRunStore runs(runPath);
-    if (!BackupConfigStore(configPath).load(&config, &result.error) || !runs.load(&result.error)) {
+    QByteArray runContents;
+    if (!BackupConfigStore(configPath).load(&config, &result.error) || !runs.load(&result.error, &runContents)) {
         return result;
     }
     const auto set = std::find_if(config.sets.cbegin(), config.sets.cend(), [&setId](const BackupSet &candidate) {
@@ -122,10 +123,36 @@ RecentCopyTarget resolveCopy(BackupProvider &provider, const QString &configPath
         return result;
     }
     if (!record->remoteCopyPath.isEmpty()) {
+        if (browse) {
+            // Navigation needs only the recorded folder; manifest identity is
+            // checked for deletion and restore, not for opening the web app.
+            result.name = set->name;
+            result.path = record->remoteCopyPath;
+            if (QDir::cleanPath(result.path) != result.path
+                || QFileInfo(result.path).path() != QDir::cleanPath(set->remoteFolder(computer))) {
+                result.error = QStringLiteral("The backup copy is outside its configured folder.");
+            }
+            return result;
+        }
         return inspectCopy(provider, *set, computer, record->remoteCopyPath);
     }
 
     // Older run records have no exact path. Identify their newest copy by its manifest once.
+    if (browse && (!workerLock.tryLock(0) || !runLock.tryLock(0))) {
+        result.error = QStringLiteral("Wait for the running backup or queue update to finish before discovering older copies.");
+        return result;
+    }
+    if (browse) {
+        // The unlocked navigation read must never overwrite a newer queue
+        // snapshot when legacy discovery remembers its result.
+        BackupRunStore currentRuns(runPath);
+        QByteArray currentContents;
+        if (!currentRuns.load(&result.error, &currentContents)) return result;
+        if (currentContents != runContents) {
+            result.error = QStringLiteral("The recent backup changed. Open it again to use the current copy.");
+            return result;
+        }
+    }
     const QString root = QDir::cleanPath(set->remoteFolder(computer));
     QVector<RemoteItem> folders;
     if (!provider.list(root, &folders, &result.error)) {
@@ -225,10 +252,11 @@ void RecentBackupCopies::start(Operation nextOperation, const QString &setId)
         pending = {};
     }
     const RecentCopyTarget confirmed = nextOperation == Operation::Delete ? pending : RecentCopyTarget {};
+    const bool browse = nextOperation == Operation::Browse;
     operation = nextOperation;
     resolving = true;
     emit busyChanged();
-    watcher.setFuture(QtConcurrent::run([this, setId, confirmed] {
-        return resolveCopy(provider, configPath, computerName, setId, confirmed);
+    watcher.setFuture(QtConcurrent::run([this, setId, confirmed, browse] {
+        return resolveCopy(provider, configPath, computerName, setId, confirmed, browse);
     }));
 }

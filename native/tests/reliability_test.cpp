@@ -7,6 +7,7 @@
 #include "../src/backupprerequisites.h"
 #include "../src/backuprunstore.h"
 #include "../src/backupschedule.h"
+#include "../src/protonfolderlink.h"
 
 class FakePrerequisiteProbe final : public BackupPrerequisiteProbe
 {
@@ -169,6 +170,10 @@ case "$2" in
     ;;
   info)
     path="$FAKE_REMOTE${@: -1}"
+    if [[ "$FAILURE" == none || "$FAILURE" == partial ]] && [[ -d "$path" ]]; then
+      printf '{"type":"folder","uid":"volume~copy-node","deprecatedShareId":"share"}'
+      exit 0
+    fi
     [[ -f "$path" ]] || exit 1
     printf '{"size":%s}' "$(stat -c %s "$path")"
     ;;
@@ -207,6 +212,12 @@ esac
     QCOMPARE(record.status, status);
     QCOMPARE(record.result.verifiedFiles, verified);
     QCOMPARE(record.result.manifestVerified, failure != "manifest");
+    const QUrl browserUrl = ProtonFolderLink::cached(ProtonFolderLink::cachePath(configPath), record.remoteCopyPath);
+    if (failure == "none" || failure == "partial") {
+        QCOMPARE(browserUrl.path(), QStringLiteral("/share/folder/copy-node"));
+    } else {
+        QVERIFY(browserUrl.isEmpty());
+    }
     if (status == "success") {
         QVERIFY(record.lastSuccess.isValid());
         QVERIFY(!record.nextAttempt.isValid());

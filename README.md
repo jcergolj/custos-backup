@@ -212,6 +212,10 @@ a standalone remote-root discovery action for a fresh installation.
 - **⋯ → Delete copy** confirms the exact copy before moving it to Proton Drive Trash.
 - **Delete** on a backup set removes its configuration and schedule; remote copies remain.
 
+Browser links are prepared in advance and cached, so opening a known copy does not
+download its manifest or wait for a Proton CLI lookup. Older or uncached copies
+may need an initial background lookup before opening.
+
 ## Daily operation
 
 - Use **Preview** before a first backup or after changing sources and exclusions.

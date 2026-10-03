@@ -23,6 +23,7 @@ add_library(omacustos-core STATIC
     src/backupprerequisites.cpp
     src/localprovider.cpp
     src/protonprovider.cpp
+    src/protonfolderlink.cpp
     src/qprocessrunner.cpp
     src/backupjob.cpp
     src/backupworker.cpp
