@@ -41,6 +41,7 @@ private slots:
     void backsUpAndRestoresReservedAndCollisionNames();
     void failedPayloadsAreNotVerified_data();
     void failedPayloadsAreNotVerified();
+    void sharedDestinationDoesNotRepeatDirectoryChecks();
     void inspectParsesVerifiedMetadata();
     void inspectParsesCliMetadataWithoutSha256();
     void inspectUsesContentSizeInsteadOfEncryptedStorageSize();
@@ -50,6 +51,33 @@ private slots:
     void rejectsNullMetadataOutput();
     void listsRemoteItemsAndUsesExactCleanupCommands();
 };
+
+void ProtonProviderTest::sharedDestinationDoesNotRepeatDirectoryChecks()
+{
+    QTemporaryDir source;
+    FilesystemRunner runner;
+    for (int i = 0; i < 100; ++i) {
+        QFile file(source.filePath(QString("file-%1.txt").arg(i)));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("payload"), qint64(7));
+    }
+    BackupEngine engine;
+    ProtonProvider provider(runner);
+    QString manifest, error;
+    QVERIFY2(engine.backup(source.path(), "/backups/copy", provider, &manifest, &error), qPrintable(error));
+    const auto cleanup = qScopeGuard([&] { QDir(QFileInfo(manifest).absolutePath()).removeRecursively(); });
+    int lists = 0, inspections = 0, uploads = 0;
+    for (const auto &call : runner.calls) {
+        lists += call.at(1) == "list";
+        inspections += call.at(1) == "info";
+        uploads += call.at(1) == "upload";
+    }
+    QCOMPARE(lists, 2);
+    QCOMPARE(uploads, 101);
+    // Both pre-upload and post-upload verification remain for every payload,
+    // plus the uploaded manifest's metadata verification.
+    QCOMPARE(inspections, 201);
+}
 
 void ProtonProviderTest::uploadUsesJsonCliArguments()
 {

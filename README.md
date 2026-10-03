@@ -193,6 +193,13 @@ dashboard. If a restore fails, the panel and your selection stay open for retry.
 Incomplete copies expose only verified entries. Missing, failed, malformed, or
 unverifiable items are not presented as successful restores.
 
+You can close the Restore panel, edit a backup, or open another backup while files
+are restoring. The active restore keeps running; its file-count progress and
+**View restore** action stay available above the current screen. Returning to a
+backup preserves the Restore destination, valid ticks, and file-list position.
+Cached file information is marked and must be verified again before a new restore.
+Copy discovery and verification may wait for an active restore to finish.
+
 For a reinstall or move to another computer, keep or transfer `~/.config/omacustos`
 so the backup definitions and run history remain available, then install OmaCustos
 and authenticate `proton-drive` as the new machine's user. The current UI opens
@@ -293,3 +300,6 @@ ctest --test-dir build --output-on-failure
 
 The main binaries are `build/omacustos` and `build/omacustos-worker`. The Arch package
 recipe is in `pkgbuild/`.
+
+See [Responsiveness measurements](native/tests/responsiveness.md) for the opt-in
+on-screen benchmark, before/after results, and outstanding target-hardware checks.

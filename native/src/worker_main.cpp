@@ -19,8 +19,74 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 namespace {
+
+// Keep the latest display sample while synchronous CLI transfers are running.
+// Only this writer touches run-state persistence during the engine operation;
+// it is joined before the worker publishes its durable success/failure status.
+class ProgressWriter final
+{
+public:
+    ProgressWriter(const QString &path, const QElapsedTimer &clock)
+        : pending(path), clock(clock), thread([this] {
+            std::unique_lock<std::mutex> lock(mutex);
+            while (!stopping) {
+                wake.wait_for(lock, std::chrono::milliseconds(100), [this] { return stopping; });
+                if (dirty && persistence.shouldSave(progress, this->clock.elapsed())) save();
+            }
+            if (dirty) save();
+        })
+    {
+    }
+
+    ~ProgressWriter()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            stopping = true;
+        }
+        wake.notify_one();
+        thread.join();
+    }
+
+    void update(const BackupRunStore &store, const BackupProgress &sample)
+    {
+        BackupRunStore snapshot = store;
+        // The worker retains a reference to its running record, so do not share
+        // the outer record vector with that reference across threads.
+        snapshot.records().detach();
+        std::lock_guard<std::mutex> lock(mutex);
+        pending = std::move(snapshot);
+        progress = sample;
+        dirty = true;
+        if (persistence.shouldSave(progress, clock.elapsed())) save();
+    }
+
+private:
+    void save()
+    {
+        QString error;
+        dirty = !pending.save(&error);
+        if (dirty) {
+            qWarning().noquote() << QStringLiteral("Unable to update backup progress:") << error;
+        }
+    }
+
+    BackupRunStore pending;
+    const QElapsedTimer &clock;
+    BackupProgress progress;
+    BackupProgressPersistence persistence;
+    std::mutex mutex;
+    std::condition_variable wake;
+    bool stopping = false;
+    bool dirty = false;
+    std::thread thread;
+};
 
 bool authenticationFailure(const QString &error)
 {
@@ -166,32 +232,28 @@ int main(int argc, char *argv[])
             QDateTime::currentDateTimeUtc(),
         };
         QElapsedTimer progressClock;
-        QElapsedTimer progressSaveClock;
         progressClock.start();
-        progressSaveClock.start();
-        const auto reportProgress = [&](const BackupProgress &progress) {
-            const bool phaseChanged = record.progress.phase != progress.phase
-                || (!progress.currentFile.isEmpty() && record.progress.currentFile != progress.currentFile);
-            record.progress = progress;
-            record.progressElapsedMs = progressClock.elapsed();
-            record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
-            if (progress.processedFiles <= 1 || progress.finalizing || phaseChanged
-                || progress.processedFiles == progress.totalFiles || progressSaveClock.elapsed() >= 1000) {
-                QString progressError;
-                if (!runStore.save(&progressError)) {
-                    qWarning().noquote() << QStringLiteral("Unable to update backup progress:") << progressError;
-                }
-                progressSaveClock.restart();
-            }
-        };
-        if (engine.backup(setIterator->sourceDirectories, copyRoot, setIterator->exclusions, metadata, provider, &manifestPath, &error, reportProgress, &record.result)) {
+        bool succeeded;
+        {
+            ProgressWriter progressWriter(runStore.filePath(), progressClock);
+            const auto reportProgress = [&](const BackupProgress &progress) {
+                record.progress = progress;
+                record.progressElapsedMs = progressClock.elapsed();
+                record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
+                progressWriter.update(runStore, progress);
+            };
+            succeeded = engine.backup(setIterator->sourceDirectories, copyRoot, setIterator->exclusions,
+                metadata, provider, &manifestPath, &error, reportProgress, &record.result);
+        }
+        if (succeeded) {
             record.progressElapsedMs = progressClock.elapsed();
             runStore.markSuccess(record, QDateTime::currentDateTime());
             qInfo().noquote() << setIterator->name << manifestPath;
 
             QVector<RemoteCopy> copies;
             QString catalogError;
-            if (BackupCatalog::discover(provider, setIterator->remoteRoot, &copies, &catalogError)) {
+            if (BackupCatalog::discoverCopies(provider, setIterator->remoteFolder(computerName),
+                    setIterator->id, &copies, &catalogError)) {
                 const QStringList targets = BackupCleanup::eligibleTargets(
                     copies, setIterator->retention, computerName, setIterator->id);
                 CleanupState &cleanupState = cleanupStore.states()[setIterator->id];

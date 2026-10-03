@@ -12,6 +12,9 @@ ScrollView {
     required property var resources
     property bool showAdvanced: false
     property bool syncingCurrentSet: false
+    property string loadedSetId: ""
+    property var scrollPositions: ({})
+    property var advancedStates: ({})
     readonly property bool backupRunning: controller.currentRunStatus === "running"
     signal closeRequested()
 
@@ -30,6 +33,13 @@ ScrollView {
     }
 
     function loadCurrentSet() {
+        const changingSet = loadedSetId !== controller.currentId
+        if (changingSet) {
+            scrollPositions[loadedSetId] = contentItem.contentY
+            advancedStates[loadedSetId] = showAdvanced
+            loadedSetId = controller.currentId
+            showAdvanced = advancedStates[loadedSetId] || false
+        }
         setNameField.text = controller.currentName
         remoteField.text = controller.currentRemoteRoot
         sourceModel.clear()
@@ -45,6 +55,15 @@ ScrollView {
         retentionSpin.value = controller.currentRetention
         acPowerCheck.checked = controller.currentOnlyOnAcPower
         loadResourcePreset()
+        if (changingSet) {
+            const id = loadedSetId
+            Qt.callLater(function () {
+                if (editor && editor.loadedSetId === id) {
+                    editor.contentItem.contentY = editor.scrollPositions[id] || 0
+                    if (editor.visible) editor.focusName()
+                }
+            })
+        }
     }
 
     function loadResourcePreset() {
@@ -53,7 +72,24 @@ ScrollView {
     }
 
     function focusName() {
-        setNameField.forceActiveFocus()
+        function inView(control) {
+            if (!control.visible || !control.enabled) return false
+            const position = control.mapToItem(editor, 0, 0)
+            return position.y >= 0 && position.y + control.height <= editor.height
+        }
+        function firstVisibleControl(item) {
+            if (item.activeFocusOnTab && inView(item)) return item
+            for (const child of item.children || []) {
+                const control = firstVisibleControl(child)
+                if (control) return control
+            }
+            return null
+        }
+        // A returned editor retains its scroll position; avoid focusing a name
+        // field above the viewport and sending subsequent typing offscreen.
+        const target = inView(setNameField) ? setNameField : firstVisibleControl(contentItem)
+        if (target) target.forceActiveFocus()
+        else editor.forceActiveFocus()
     }
 
     function addSource(url) {
@@ -558,6 +594,25 @@ ScrollView {
             }
         }
 
+        RowLayout {
+            visible: editor.controller.previewBusy
+            Layout.fillWidth: true
+            BusyIndicator {
+                objectName: "previewLoadingIndicator"
+                running: editor.controller.previewBusy
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 24
+            }
+            Label {
+                objectName: "previewLoadingMessage"
+                text: editor.controller.previewAvailable
+                    ? qsTr("Scanning sources… Showing the previous preview while refreshing.")
+                    : qsTr("Scanning sources… You can continue editing or return to the dashboard.")
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+
         Label {
             text: qsTr("Retention cleanup is waiting for confirmation. Proposed deletions:")
             font.pixelSize: editor.style.bodyTypeSize
@@ -612,6 +667,7 @@ ScrollView {
                 style: editor.style
                 objectName: "previewBackupSetButton"
                 text: qsTr("Preview")
+                enabled: !editor.controller.previewBusy
                 onClicked: {
                     editor.syncCurrentSet()
                     editor.controller.preview()

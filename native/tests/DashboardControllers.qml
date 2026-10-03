@@ -73,10 +73,14 @@ QtObject {
         property var remainingTimes: ({})
         property var transferProgress: ({})
         property var runDetails: ({})
+        readonly property var runSummaries: runDetails
+        onRunDetailsChanged: runStateChanged()
         property var recentBackups: ["Photos\nNo backup run yet", "Documents\nsucceeded"]
         property var recentBackupSetIds: ["photos-id", "documents-id"]
         property var recentBackupTimestamps: ["", "01/10/2026 10:00:00"]
         property bool previewAvailable: false
+        property bool previewBusy: false
+        property string dashboardRefreshError: ""
         property int previewCount: 0
         property int saveCount: 0
         property var previewIncluded: []
@@ -92,11 +96,13 @@ QtObject {
         property string exportedPath: ""
         property bool importSucceeds: true
         signal currentSetChanged()
+        signal runStateChanged()
         signal statusChanged(string status)
         signal failed(string error)
         onCurrentIndexChanged: {
             previewAvailable = false
-            currentSetChanged()
+            // Let dependent QML bindings settle before mirroring the C++ signal.
+            Qt.callLater(currentSetChanged)
         }
         function removeSet(index) { removedIndex = index }
         function removeCurrentSet() { removeSet(currentIndex) }
@@ -115,6 +121,7 @@ QtObject {
         function exportSets(path) { exportedPath = path; return true }
         function confirmCleanup() { return true }
         function refreshRunState() { refreshCount++ }
+        function backupDetails(setId) { return runDetails[setId] || ({}) }
     }
 
     property QtObject backupLauncher: QtObject {
@@ -154,6 +161,16 @@ QtObject {
 
     property QtObject restoreController: QtObject {
         property bool busy: false
+        property bool restoring: false
+        readonly property bool browsing: busy && !restoring
+        readonly property string backupFolder: discoveredRoot
+        readonly property string backupId: discoveredSetId
+        readonly property string currentCopyPath: currentCopyIndex >= 0 ? discoveredRoot + "/copy-" + currentCopyIndex : ""
+        property string browseError: ""
+        property string restoreProgress: ""
+        property string restoreBackupFolder: ""
+        property string restoreBackupId: ""
+        property string restoreCopyPath: ""
         property string loadingMessage: ""
         property bool showingCachedData: false
         property bool verified: false
@@ -174,14 +191,19 @@ QtObject {
         signal statusChanged(string status)
         signal failed(string error)
         signal restoreCompleted()
+        signal restoreCompletedForContext(string folder, string setId, string copyPath)
         function discover(remoteRoot, setId) { discoveredRoot = remoteRoot; discoveredSetId = setId }
         function selectCopy(index) { selectedCopy = index; currentCopyIndex = index }
         function restoreSelected(indexes, destination) {
+            restoreBackupFolder = backupFolder
+            restoreBackupId = backupId
+            restoreCopyPath = currentCopyPath
             restoredIndexes = indexes.slice()
             restoreDestination = destination
             restoreCount++
             if (restoreSucceeds) {
                 restoreCompleted()
+                restoreCompletedForContext(restoreBackupFolder, restoreBackupId, restoreCopyPath)
             } else {
                 failed("Restore failed")
             }

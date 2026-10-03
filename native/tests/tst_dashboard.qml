@@ -38,6 +38,11 @@ TestCase {
         backupSetController.setNames = ["Documents", "Photos"]
         backupSetController.setIds = ["documents-id", "photos-id"]
         backupSetController.currentIndex = 0
+        backupSetController.currentName = Qt.binding(function () { return backupSetController.setNames[backupSetController.currentIndex] || "" })
+        backupSetController.currentRemoteRoot = Qt.binding(function () { return "/backups/" + backupSetController.currentId })
+        backupSetController.currentSources = Qt.binding(function () { return ["/safe/" + backupSetController.currentId] })
+        backupSetController.previewBusy = false
+        backupSetController.dashboardRefreshError = ""
         backupSetController.runningSetIds = []
         backupSetController.remainingTimes = {}
         backupSetController.transferProgress = {}
@@ -62,6 +67,9 @@ TestCase {
         restoreController.discoveredRoot = ""
         restoreController.discoveredSetId = ""
         restoreController.busy = false
+        restoreController.restoring = false
+        restoreController.restoreProgress = ""
+        restoreController.browseError = ""
         restoreController.loadingMessage = ""
         restoreController.showingCachedData = false
         restoreController.verified = false
@@ -155,7 +163,7 @@ TestCase {
         mouseClick(menu.itemAt(0))
         tryCompare(app, "showEditor", true)
         compare(backupSetController.currentIndex, 1)
-        compare(control("setNameField").text, "Photos")
+        tryCompare(control("setNameField"), "text", "Photos")
         compare(backupLauncher.launchedId, "")
     }
 
@@ -309,7 +317,7 @@ TestCase {
         compare(app.showRestore, false)
         backupSetController.currentIndex = 1
         mouseClick(control("restore-1"))
-        compare(backupSetController.currentIndex, 0)
+        compare(backupSetController.currentIndex, 1)
         compare(restoreController.discoveredRoot, "/backups/documents-id")
         compare(restoreController.discoveredSetId, "documents-id")
         compare(app.showRestore, true)
@@ -332,8 +340,8 @@ TestCase {
         verify(control("restoreLoadingIndicator").running)
         compare(control("restoreLoadingMessage").text, "Loading backup copies…")
         compare(control("restoreCopySelector").enabled, false)
-        compare(control("restoreCopySearch").enabled, false)
-        compare(control("restore-1").enabled, false)
+        compare(control("restoreCopySearch").enabled, true)
+        compare(control("restore-1").enabled, true)
         compare(control("startRestoreButton").enabled, false)
 
         restoreController.copies = ["Computer / Documents / copy-id"]
@@ -348,7 +356,134 @@ TestCase {
         restoreController.busy = true
         restoreController.loadingMessage = "Loading and verifying files…"
         compare(control("restoreLoadingMessage").text, "Loading and verifying files…")
-        compare(selector.enabled, false)
+        compare(selector.enabled, true)
+    }
+
+    function test_restoreNavigationAndFocusRemainAvailableDuringTransfer() {
+        mouseClick(control("restore-1"))
+        restoreController.restoring = true
+        restoreController.busy = true
+        restoreController.restoreProgress = "0 of 2 files restored"
+        restoreController.restoreBackupId = "documents-id"
+        restoreController.restoreBackupFolder = "/backups/documents-id"
+        verify(control("restore-1").enabled)
+        mouseClick(control("closeRestoreButton"))
+        compare(app.showRestore, false)
+        verify(control("activeRestoreProgress").visible)
+        mouseClick(control("returnToRestoreButton"))
+        compare(app.showRestore, true)
+        tryCompare(control("restoreCopySearch"), "activeFocus", true)
+        compare(restoreController.restoring, true)
+        compare(control("startRestoreButton").enabled, false)
+    }
+
+    function test_returningToRestorePreservesDestinationTicksAndScroll() {
+        showRestoreFiles()
+        mouseClick(control("restoreFile-0"))
+        const destination = control("restoreDestinationField")
+        destination.text = "/safe/return-here"
+        const list = control("restoreFilesList")
+        mouseClick(control("closeRestoreButton"))
+        mouseClick(control("restore-1"))
+        compare(destination.text, "/safe/return-here")
+        compare(app.selectedRestoreIndexes, [0])
+        compare(control("restoreFile-0").checked, true)
+        compare(list.contentY, 0)
+    }
+
+    function test_largeRestoreKeepsOffscreenSelectionsAndScrollAcrossRefreshAndReturn() {
+        mouseClick(control("restore-1"))
+        const paths = []
+        const indexes = []
+        const copies = []
+        for (let index = 0; index < 10000; ++index) {
+            paths.push("/safe/documents/file-" + index + ".txt")
+            indexes.push(index)
+        }
+        for (let copy = 0; copy < 100; ++copy) copies.push("Documents / copy-" + copy)
+        restoreController.copies = copies
+        restoreController.currentCopyIndex = 0
+        restoreController.entries = paths
+        restoreController.verified = true
+        app.selectedRestorePaths = paths.slice()
+        app.selectedRestoreIndexes = indexes
+        const list = control("restoreFilesList")
+        tryCompare(list, "count", 10000)
+        list.positionViewAtIndex(5000, ListView.Center)
+        waitForRendering(app.contentItem)
+        verify(control("restoreFile-5000").checked)
+        // Exercise the actual checkbox handler, including a large offscreen
+        // selection, without depending on instantiated delegates for its state.
+        control("restoreFile-5000").toggle()
+        control("restoreFile-5000").toggled()
+        compare(app.selectedRestoreIndexes.length, 9999)
+        verify(app.selectedRestoreIndexes.indexOf(5000) < 0)
+        const scrollY = list.contentY
+        mouseClick(control("closeRestoreButton"))
+        mouseClick(control("restore-1"))
+        tryCompare(list, "contentY", scrollY)
+        verify(!control("restoreFile-5000").checked)
+        restoreController.entries = paths.slice().reverse()
+        compare(app.selectedRestoreIndexes.length, 9999)
+        verify(app.selectedRestoreIndexes.indexOf(4999) < 0)
+        verify(app.selectedRestoreIndexes.indexOf(9999) >= 0)
+        restoreController.entries = paths.slice(1)
+        compare(app.selectedRestoreIndexes.length, 9998)
+        verify(app.selectedRestorePaths.indexOf(paths[0]) < 0)
+    }
+
+    function test_previewLoadingAllowsTypingAndNavigationAndShowsLastGoodData() {
+        mouseClick(control("newBackupSetButton"))
+        backupSetController.previewAvailable = true
+        backupSetController.previewIncluded = ["/safe/previous.txt"]
+        backupSetController.previewBusy = true
+        verify(control("previewLoadingIndicator").running)
+        verify(control("previewLoadingMessage").text.indexOf("previous preview") >= 0)
+        verify(!control("previewBackupSetButton").enabled)
+        const name = control("setNameField")
+        tryCompare(name, "text", "New set")
+        name.forceActiveFocus()
+        name.cursorPosition = name.text.length
+        keyClick(Qt.Key_X)
+        verify(name.text.endsWith("x"))
+        mouseClick(control("closeEditorButton"))
+        compare(app.showEditor, false)
+        compare(backupSetController.previewBusy, true)
+    }
+
+    function test_editorReturnPreservesScrollForEachBackup() {
+        app.editSet(0)
+        const editor = control("editorScrollView")
+        tryCompare(control("setNameField"), "text", "Documents")
+        app.showAdvanced = true
+        waitForRendering(app.contentItem)
+        editor.contentItem.contentY = 300
+        const scrollY = editor.contentItem.contentY
+        app.editSet(1)
+        tryCompare(control("setNameField"), "text", "Photos")
+        app.editSet(0)
+        tryCompare(control("setNameField"), "text", "Documents")
+        tryCompare(editor.contentItem, "contentY", scrollY)
+        compare(app.showAdvanced, true)
+        tryVerify(function () {
+            const focused = app.activeFocusItem
+            if (!focused) return false
+            const position = focused.mapToItem(editor, 0, 0)
+            return position.y >= 0 && position.y + focused.height <= editor.height
+        }, 1000, "Returning to a scrolled editor should focus an in-view control")
+    }
+
+    function test_oldTransferCompletionDoesNotCloseAnotherContext() {
+        showRestoreFiles()
+        const oldFolder = restoreController.backupFolder
+        const oldId = restoreController.backupId
+        const oldCopy = restoreController.currentCopyPath
+        backupSetController.recentBackupTimestamps = ["01/10/2026 10:00:00", "01/10/2026 10:00:00"]
+        app.restoreRecentBackup(0)
+        control("restoreDestinationField").text = "/safe/photos"
+        restoreController.restoreCompletedForContext(oldFolder, oldId, oldCopy)
+        compare(app.showRestore, true)
+        compare(control("restoreDestinationField").text, "/safe/photos")
     }
 
     function showRestoreFiles() {
@@ -601,7 +736,7 @@ TestCase {
         mouseClick(control("newBackupSetButton"))
         compare(backupSetController.addedCount, 1)
         compare(app.showEditor, true)
-        compare(control("setNameField").text, "New set")
+        tryCompare(control("setNameField"), "text", "New set")
     }
 
     function test_importAndExportUseChosenLocalFiles() {

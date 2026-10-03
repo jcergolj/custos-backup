@@ -77,6 +77,9 @@ Exclusions containing a path separator match that path and its descendants.
 Bare names such as `node_modules` match directory names at every depth; regular
 files with the same name remain included. Matching is exact and case-sensitive.
 Excluded symbolic links and unreadable paths do not mark a copy incomplete.
+Rules are normalized once per scan. Backup selection prunes excluded directory
+subtrees; the interactive preview still traverses them to report individual
+excluded files.
 
 Folder traversal includes hidden regular files and hidden subdirectories, whether
 the selected root itself is hidden or visible. The same exclusion rules apply to
@@ -113,6 +116,10 @@ staging failures produce failed items, never successful entries.
 A provider SHA-256 field is used when the CLI exposes one. Existing remote payloads
 are reused only when both size and checksum match the staged bytes. With size-only
 metadata, retries re-upload the snapshot rather than trusting same-sized content.
+Within a backup operation, each payload parent directory is ensured once. A failed
+upload invalidates that parent's cached result and rechecks it before one retry of
+the same staged bytes; post-upload verification still applies. The cache is never
+shared across backup operations.
 
 `QProcessRunner` uses a five-minute total runtime limit for metadata and other
 commands, and a separate 24-hour limit for `filesystem upload` and
@@ -150,7 +157,10 @@ The engine reports planned file sizes, processed files and bytes, and a finalizi
 phase, along with verified file/byte counts, failed-item counts, current file and
 size, and reading/checking/uploading/verifying phases. The worker persists these
 progress samples in run state, throttled to approximately once per second except
-for initial progress, file/phase changes, and finalization.
+for initial progress, completion of the planned file attempts, and finalization.
+File and phase changes coalesce into the latest sample. A serialized progress
+writer also publishes pending samples during synchronous long-running transfers,
+and is joined before durable success/failure state is saved.
 Processed counts include failed attempts; they describe work done, not verified
 backup contents. Manifest verification remains the authority for successful files.
 
@@ -162,7 +172,11 @@ backup cannot provide an estimate before that file finishes. Older run records
 without progress remain compatible and show an estimating state.
 
 The UI polls once per second while a backup is running and every five seconds
-otherwise. Expired estimates show **Taking longer than estimated…** rather than
+otherwise. Unchanged state contents skip JSON parsing and model notifications;
+countdowns update independently of the recent-backup model. Ordering, summaries,
+and transfer display data are cached once per refresh. Detailed issue lists are
+converted only when requested, including while the details dialog is open.
+Expired estimates show **Taking longer than estimated…** rather than
 claiming zero remaining time. Manifest upload, verification, and post-backup
 cleanup show **Finalizing backup…** until the worker records its final result.
 
@@ -184,6 +198,10 @@ Retention considers only positively identified OmaCustos copies for the
 correct computer and backup. Successful verified copies are retained according to
 the backup's limit. Failed or incomplete copies cannot cause an older successful
 copy to be removed.
+Post-backup discovery lists direct copy directories under that computer's backup
+folder and verifies their manifests and payload metadata. It does not recursively
+scan other computers, backups, or payload directories. Full-root discovery remains
+available for catalog discovery.
 
 Before the first cleanup, the exact remote paths are persisted as a proposal and
 shown in the UI. No deletion occurs until the proposal is confirmed. If
@@ -216,8 +234,36 @@ traversal and symbolic-link escapes are rejected. The UI requires users to tick
 files and specify a destination folder before enabling its single **Start
 restore** action. Restore metadata is not added to the local backup queue.
 The controller emits completion only after every selected file restores
-successfully. The UI then closes the restore panel, clears its selection and
-destination, and scrolls back to the dashboard. Failures keep the panel open.
+successfully. If that copy is still displayed, the UI closes the restore panel,
+clears its selection and destination, and scrolls back to the dashboard.
+Failures keep the panel open.
+
+Restore transfers retain their backup/copy identity and selected payload snapshot
+independently of the currently displayed context. A controller-owned serial
+executor keeps provider calls serialized while allowing immediate local navigation;
+copy discovery/verification can wait behind an active transfer. Superseded browse
+results, including errors, cannot publish into the current context. Successful
+completion only closes the displayed panel if its backup and copy still match.
+File-count progress remains available above both the dashboard and editor.
+Superseded verification is cancelled between provider calls, including before a
+queued task starts and after manifest download. An already-running provider call
+finishes under its normal timeout before the latest browse request proceeds.
+
+The controller retains bounded last-good display snapshots for 20 backup contexts.
+Returning to a context invalidates restore eligibility until current verification;
+copy identity, destination validation, and checksums remain authoritative. The
+interface retains destination, valid file ticks, and scroll position per backup.
+File-path display lists are cached, and selection remapping builds one path index
+per refresh rather than repeatedly reconstructing or searching the 10,000-file list.
+
+Source preview scans run asynchronously against captured source/exclusion lists.
+Selection/input changes invalidate obsolete results, and repeated requests coalesce
+to the latest pending scan. Loading feedback distinguishes the previous preview
+from the pending result. Local-state refresh failures retain last-good run/cleanup
+data and expose a persistent refresh error.
+
+See [Responsiveness measurements](native/tests/responsiveness.md) for the benchmark
+method, separate workload results, and remaining hardware/presentation validation.
 
 ## Desktop Theme
 

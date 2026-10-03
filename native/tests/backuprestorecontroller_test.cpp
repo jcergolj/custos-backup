@@ -90,25 +90,29 @@ public:
     }
 };
 
-static bool createCopy(const QTemporaryDir &remote, const QString &folder, const QString &setId, const QString &copyId)
+static bool createCopy(const QTemporaryDir &remote, const QString &folder, const QString &setId, const QString &copyId, int fileCount = 1)
 {
     if (!QDir().mkpath(remote.filePath(folder + "/nested"))) {
         return false;
     }
-    QFile file(remote.filePath(folder + "/nested/notes.txt"));
-    if (!file.open(QIODevice::WriteOnly) || file.write("notes") != 5) {
-        return false;
+    QJsonArray entries;
+    QJsonArray expected;
+    for (int i = 0; i < fileCount; ++i) {
+        const QString name = fileCount == 1 ? QString("notes.txt") : QString("notes-%1.txt").arg(i);
+        const QString relative = "nested/" + name;
+        QFile file(remote.filePath(folder + "/" + relative));
+        if (!file.open(QIODevice::WriteOnly) || file.write("notes") != 5) return false;
+        entries.append(QJsonObject {{"source", "/source/" + name}, {"remote", folder + "/" + relative},
+            {"restore", relative}, {"size", 5},
+            {"sha256", QString::fromLatin1(QCryptographicHash::hash("notes", QCryptographicHash::Sha256).toHex())}});
+        expected.append(relative);
     }
-    file.close();
-    const QJsonArray entries {QJsonObject {{"source", "/source/notes.txt"}, {"remote", folder + "/nested/notes.txt"},
-        {"restore", "nested/notes.txt"}, {"size", 5},
-        {"sha256", QString::fromLatin1(QCryptographicHash::hash("notes", QCryptographicHash::Sha256).toHex())}}};
     QFile manifest(remote.filePath(folder + "/manifest.json"));
     return manifest.open(QIODevice::WriteOnly)
         && manifest.write(QJsonDocument(QJsonObject {{"version", 2}, {"application", "omacustos"},
             {"computer", "computer"}, {"set_id", setId}, {"set_name", "Documents"}, {"copy_id", copyId},
             {"created_at", "2026-10-02T12:00:00.000Z"}, {"status", "complete"},
-            {"expected", QJsonArray {"nested/notes.txt"}}, {"failed", QJsonArray {}}, {"entries", entries}}).toJson()) > 0;
+            {"expected", expected}, {"failed", QJsonArray {}}, {"entries", entries}}).toJson()) > 0;
 }
 
 class BackupRestoreControllerTest final : public QObject
@@ -125,6 +129,10 @@ private slots:
     void completesOnlyAfterAllSelectedFilesAreRestored_data();
     void completesOnlyAfterAllSelectedFilesAreRestored();
     void restoresWithoutBlockingTheControllerThread();
+    void navigationSupersedesDiscoveryWithoutPublishingOldResults();
+    void navigationDuringRestoreKeepsTransferIndependent();
+    void supersededVerificationCannotReplaceCurrentCopy();
+    void supersededVerificationStopsBeforeInspectingRemainingFiles();
     void qmlEligibilityTracksVerificationAndRestore_data();
     void qmlEligibilityTracksVerificationAndRestore();
     void rediscoveryKeepsFilesCachedUntilReverification_data();
@@ -136,6 +144,129 @@ private slots:
     void rejectsUnidentifiableCopies_data();
     void rejectsUnidentifiableCopies();
 };
+
+void BackupRestoreControllerTest::supersededVerificationStopsBeforeInspectingRemainingFiles()
+{
+    QTemporaryDir remote;
+    const QString folder = "backups/computer/Documents";
+    QVERIFY(createCopy(remote, folder + "/copy-z", "documents", "copy-z", 100));
+    QVERIFY(createCopy(remote, folder + "/copy-a", "documents", "copy-a"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    const auto unblock = qScopeGuard([&] { provider.release.release(200); });
+    controller.discover(folder, "documents");
+    QTRY_VERIFY(!controller.busy());
+    provider.blockInspect = true;
+    controller.selectCopy(0);
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    controller.selectCopy(1);
+    provider.release.release(200);
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(provider.inspectedPaths.size(), 2);
+    QVERIFY(provider.inspectedPaths.first().startsWith(folder + "/copy-z/"));
+    QCOMPARE(provider.inspectedPaths.last(), folder + "/copy-a/nested/notes.txt");
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+    QVERIFY(controller.restoreEligible());
+}
+
+void BackupRestoreControllerTest::supersededVerificationCannotReplaceCurrentCopy()
+{
+    QTemporaryDir remote;
+    const QString folder = "backups/computer/Documents";
+    QVERIFY(createCopy(remote, folder + "/copy-a", "documents", "copy-a"));
+    QVERIFY(createCopy(remote, folder + "/copy-b", "documents", "copy-b"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    const auto unblock = qScopeGuard([&] { provider.release.release(10); });
+    controller.discover(folder, "documents");
+    QTRY_VERIFY(!controller.busy());
+    provider.blockInspect = true;
+    controller.selectCopy(0);
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    controller.selectCopy(1);
+    QVERIFY(!controller.restoreEligible());
+    provider.release.release(10);
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.currentCopyIndex(), 1);
+    QCOMPARE(controller.currentCopyPath(), folder + "/copy-a");
+    QVERIFY(controller.restoreEligible());
+    QCOMPARE(provider.downloadedPaths, (QStringList {folder + "/copy-b/manifest.json", folder + "/copy-a/manifest.json"}));
+}
+
+void BackupRestoreControllerTest::navigationSupersedesDiscoveryWithoutPublishingOldResults()
+{
+    QTemporaryDir remote;
+    const QString first = "backups/computer/Documents";
+    const QString second = "backups/computer/Photos";
+    QVERIFY(createCopy(remote, first + "/old-copy", "documents", "old-copy"));
+    QVERIFY(createCopy(remote, second + "/new-copy", "photos", "new-copy"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    provider.blockList = true;
+    BackupRestoreController controller(engine, &provider);
+    const auto unblock = qScopeGuard([&] { provider.release.release(10); });
+    controller.discover(first, "documents");
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    controller.discover(second, "photos");
+    provider.release.release(10);
+    QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.copies().size(), 1);
+    QVERIFY(controller.copies().first().contains("new-copy"));
+    QVERIFY(!controller.restoreEligible());
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(controller.restoreEligible());
+    controller.discover(first, "documents");
+    QTRY_VERIFY(!controller.busy());
+    controller.discover(second, "photos");
+    // Cached snapshot is available synchronously when returning, but never grants
+    // restore eligibility before current-context verification.
+    QCOMPARE(controller.entries(), QStringList {"/source/notes.txt"});
+    QVERIFY(controller.showingCachedData());
+    QVERIFY(!controller.restoreEligible());
+    provider.release.release(10);
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(!controller.restoreEligible());
+}
+
+void BackupRestoreControllerTest::navigationDuringRestoreKeepsTransferIndependent()
+{
+    QTemporaryDir remote, destination;
+    const QString first = "backups/computer/Documents";
+    const QString second = "backups/computer/Photos";
+    QVERIFY(createCopy(remote, first + "/copy", "documents", "copy"));
+    QVERIFY(createCopy(remote, second + "/copy", "photos", "copy"));
+    BackupEngine engine;
+    RestoreTestProvider provider(remote.path());
+    BackupRestoreController controller(engine, &provider);
+    const auto unblock = qScopeGuard([&] { provider.release.release(10); });
+    controller.discover(first, "documents");
+    QTRY_VERIFY(!controller.busy());
+    controller.selectCopy(0);
+    QTRY_VERIFY(!controller.busy());
+    provider.blockDownload = true;
+    controller.restoreSelected({0}, destination.path());
+    QTRY_VERIFY(provider.entered.available() > 0);
+    provider.entered.acquire();
+    controller.discover(second, "photos");
+    QVERIFY(controller.entries().isEmpty());
+    QVERIFY(controller.property("restoring").toBool());
+    QVERIFY(controller.property("browsing").toBool());
+    bool heartbeat = false;
+    QTimer::singleShot(0, &controller, [&] { heartbeat = true; });
+    QTRY_VERIFY(heartbeat);
+    provider.release.release(10);
+    QTRY_VERIFY(!controller.busy());
+    QVERIFY(QFile::exists(destination.filePath("nested/notes.txt")));
+    QCOMPARE(provider.listedPaths.last(), second);
+    QVERIFY(controller.entries().isEmpty());
+    QCOMPARE(controller.property("restoreProgress").toString(), QString("1 of 1 files restored"));
+}
 
 void BackupRestoreControllerTest::restoresSurvivingFileAfterUploadFailure_data()
 {
@@ -176,7 +307,7 @@ void BackupRestoreControllerTest::restoresSurvivingFileAfterUploadFailure()
             QDir(QFileInfo(manifestPath).path()).removeRecursively();
         }
     });
-    QCOMPARE(provider.failedUploads, QStringList {copy + "/failed.txt"});
+    QCOMPARE(provider.failedUploads, (QStringList {copy + "/failed.txt", copy + "/failed.txt"}));
     QVERIFY(result.manifestVerified);
     QCOMPARE(result.verifiedFiles, qint64(1));
     QCOMPARE(result.verifiedBytes, qint64(5));
@@ -481,8 +612,6 @@ void BackupRestoreControllerTest::browsesWithoutBlockingAndVerifiesOnlyTheSelect
     QTRY_VERIFY(heartbeat);
     QVERIFY(controller.busy());
     QVERIFY(controller.copies().isEmpty());
-    controller.discover("backups/other-computer/Other", "other-id");
-    controller.setCopySearch("ignored while loading");
     provider.release.release();
     QTRY_VERIFY(!controller.busy());
     QCOMPARE(provider.listedPaths, QStringList {folder});
@@ -503,7 +632,6 @@ void BackupRestoreControllerTest::browsesWithoutBlockingAndVerifiesOnlyTheSelect
     QTimer::singleShot(0, &controller, [&] { heartbeat = true; });
     QTRY_VERIFY(heartbeat);
     QVERIFY(controller.entries().isEmpty());
-    controller.selectCopy(1); // Busy selections cannot replace the in-flight result.
     provider.release.release();
     QTRY_VERIFY(!controller.busy());
     QCOMPARE(controller.currentCopyIndex(), 0);

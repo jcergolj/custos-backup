@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QStringList>
 #include <QVector>
+#include <functional>
 
 struct RemoteCopy {
     QString rootPath;
@@ -31,6 +32,8 @@ class BackupCatalog final
 public:
     static bool discover(BackupProvider &provider, const QString &remoteRoot, QVector<RemoteCopy> *copies, QString *error = nullptr);
     static bool listCopies(BackupProvider &provider, const QString &backupFolder, QVector<RemoteCopy> *copies, QString *error = nullptr);
+    static bool discoverCopies(BackupProvider &provider, const QString &backupFolder, const QString &expectedSetId,
+        QVector<RemoteCopy> *copies, QString *error = nullptr);
     static bool verifyCopy(BackupProvider &provider, const QString &copyFolder, const QString &expectedSetId,
-        RemoteCopy *copy, QString *error = nullptr);
+        RemoteCopy *copy, QString *error = nullptr, const std::function<bool()> &cancelled = {});
 };

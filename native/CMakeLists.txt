@@ -133,3 +133,8 @@ omacustos_add_test(backupmanifest-test tests/backupmanifest_test.cpp omacustos-c
 omacustos_add_test(backuprestorecontroller-test tests/backuprestorecontroller_test.cpp omacustos-controllers)
 target_link_libraries(backuprestorecontroller-test PRIVATE Qt6::Qml)
 omacustos_add_test(retention-discovery-test tests/retention_discovery_test.cpp omacustos-core)
+
+# Environment-sensitive, on-screen timings are opt-in, never a CTest gate.
+qt_add_executable(responsiveness-benchmark tests/responsiveness_benchmark.cpp)
+target_link_libraries(responsiveness-benchmark PRIVATE omacustos-controllers Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Test)
+target_compile_definitions(responsiveness-benchmark PRIVATE OMACUSTOS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

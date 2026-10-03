@@ -14,15 +14,24 @@
 class FailingProvider final : public BackupProvider
 {
 public:
-    explicit FailingProvider(const QString &root) : local(root) {}
+    explicit FailingProvider(const QString &root) : local(root), localRoot(root) {}
     LocalProvider local;
+    QString localRoot;
     bool failManifest = false;
     bool failAll = false;
     bool omitChecksum = false;
     QStringList uploadedPayloads;
+    QStringList ensuredPaths;
+    bool removeDirectoryOnUpload = false;
     bool upload(const QString &source, const QString &remote, QString *error) override
     {
         if (!remote.endsWith("manifest.json")) uploadedPayloads.append(source);
+        if (removeDirectoryOnUpload) {
+            removeDirectoryOnUpload = false;
+            QDir(localRoot + "/" + QFileInfo(remote).path()).removeRecursively();
+            if (error) *error = QStringLiteral("The destination folder disappeared.");
+            return false;
+        }
         if (remote.endsWith("bad-upload") || (failManifest && remote.endsWith("manifest.json"))
             || (failAll && !remote.endsWith("manifest.json"))) {
             if (error) *error = QStringLiteral("Connection interrupted");
@@ -37,7 +46,11 @@ public:
         if (omitChecksum) file->checksum.clear();
         return true;
     }
-    bool ensureDirectory(const QString &path, QString *error) override { return local.ensureDirectory(path, error); }
+    bool ensureDirectory(const QString &path, QString *error) override
+    {
+        ensuredPaths.append(path);
+        return local.ensureDirectory(path, error);
+    }
     bool download(const QString &path, const QString &destination, QString *error) override { return local.download(path, destination, error); }
     bool list(const QString &path, QVector<RemoteItem> *items, QString *error) override { return local.list(path, items, error); }
     bool trash(const QString &path, QString *error) override { return local.trash(path, error); }
@@ -74,7 +87,64 @@ private slots:
     void reportsProgressForIncludedFilesAndFinalization();
     void reportsFailuresAndKeepsOnlyVerifiedFilesRestorable_data();
     void reportsFailuresAndKeepsOnlyVerifiedFilesRestorable();
+    void ensuresEachPayloadDirectoryOnceAndRechecksFailedUploads();
+    void progressPersistenceBoundsWritesAndKeepsFinalSamples();
 };
+
+void BackupEngineTest::ensuresEachPayloadDirectoryOnceAndRechecksFailedUploads()
+{
+    QTemporaryDir source, remote;
+    QVERIFY(QDir().mkpath(source.filePath("nested")));
+    for (int i = 0; i < 100; ++i) {
+        QFile file(source.filePath(QString("nested/file-%1").arg(i)));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("payload"), qint64(7));
+    }
+    BackupEngine engine;
+    FailingProvider provider(remote.path());
+    QString manifest, error;
+    QVERIFY2(engine.backup({source.path()}, "copy", {}, provider, &manifest, &error), qPrintable(error));
+    QCOMPARE(provider.ensuredPaths, (QStringList {"copy", "copy/nested"}));
+    QDir(QFileInfo(manifest).absolutePath()).removeRecursively();
+
+    provider.ensuredPaths.clear();
+    provider.removeDirectoryOnUpload = true;
+    QVERIFY2(engine.backup({source.path()}, "retry", {}, provider, &manifest, &error), qPrintable(error));
+    QCOMPARE(provider.ensuredPaths, (QStringList {"retry", "retry/nested", "retry/nested"}));
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifest, &entries));
+    QCOMPARE(entries.size(), 100);
+    for (const BackupEntry &entry : entries) {
+        RemoteFile file;
+        QVERIFY(provider.inspect(entry.remotePath, &file, &error));
+        QCOMPARE(file.checksum, entry.checksum);
+    }
+    QDir(QFileInfo(manifest).absolutePath()).removeRecursively();
+}
+
+void BackupEngineTest::progressPersistenceBoundsWritesAndKeepsFinalSamples()
+{
+    BackupProgressPersistence persistence;
+    BackupProgress progress;
+    progress.totalFiles = 10000;
+    int saves = 0;
+    // 40,000 phase transitions in a simulated ten-second run must not produce
+    // 40,000 state commits. Elapsed time is deterministic, not a timing assertion.
+    for (int i = 0; i < 40000; ++i) {
+        progress.processedFiles = i / 4;
+        progress.currentFile = QString::number(progress.processedFiles);
+        progress.phase = QString::number(i % 4);
+        saves += persistence.shouldSave(progress, i / 4);
+    }
+    QCOMPARE(saves, 10);
+    progress.processedFiles = 10000;
+    QVERIFY(persistence.shouldSave(progress, 9999));
+    QVERIFY(!persistence.shouldSave(progress, 9999));
+    progress.finalizing = true;
+    QVERIFY(persistence.shouldSave(progress, 9999));
+    QVERIFY(!persistence.shouldSave(progress, 9999));
+    QVERIFY(persistence.shouldSave(progress, 10999));
+}
 
 void BackupEngineTest::reportsProgressForIncludedFilesAndFinalization_data()
 {

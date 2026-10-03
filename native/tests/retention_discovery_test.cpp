@@ -2,6 +2,7 @@
 #include <QTest>
 
 #include <algorithm>
+#include <memory>
 
 #include "../src/backupcatalog.h"
 #include "../src/backupengine.h"
@@ -13,12 +14,25 @@ class RecordingProvider final : public BackupProvider
 public:
     QStringList calls;
     bool failPermanentDelete = false;
+    std::unique_ptr<LocalProvider> local;
 
     bool upload(const QString &, const QString &, QString *) override { return true; }
     bool ensureDirectory(const QString &, QString *) override { return true; }
-    bool download(const QString &, const QString &, QString *) override { return true; }
-    bool inspect(const QString &, RemoteFile *, QString *) override { return true; }
-    bool list(const QString &, QVector<RemoteItem> *, QString *) override { return true; }
+    bool download(const QString &path, const QString &destination, QString *error) override
+    {
+        calls.append("download:" + path);
+        return local ? local->download(path, destination, error) : true;
+    }
+    bool inspect(const QString &path, RemoteFile *file, QString *error) override
+    {
+        calls.append("inspect:" + path);
+        return local ? local->inspect(path, file, error) : true;
+    }
+    bool list(const QString &path, QVector<RemoteItem> *items, QString *error) override
+    {
+        calls.append("list:" + path);
+        return local ? local->list(path, items, error) : true;
+    }
     bool trash(const QString &path, QString *) override
     {
         calls.append(QStringLiteral("trash:%1").arg(path));
@@ -47,7 +61,49 @@ private slots:
     void firstCleanupDecisionRemainsPendingUntilConfirmed();
     void cleanupUsesExactTargetsAndResumesAfterPermanentDeleteFailure();
     void discoversCompleteAndIncompleteCopiesWithoutLocalState();
+    void scopedDiscoverySkipsOtherBackupsAndPreservesVerificationGates();
 };
+
+void RetentionDiscoveryTest::scopedDiscoverySkipsOtherBackupsAndPreservesVerificationGates()
+{
+    QTemporaryDir source, remote;
+    QVERIFY(QDir().mkpath(source.filePath("nested")));
+    QFile file(source.filePath("nested/notes.txt"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("notes"), qint64(5));
+    file.close();
+    BackupEngine engine;
+    LocalProvider local(remote.path());
+    const QString root = "backups/computer/Documents";
+    QString manifest, error;
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    for (const QString &copy : {QString("old"), QString("new"), QString("wrong-set")}) {
+        const BackupCopyMetadata metadata {"computer", copy == "wrong-set" ? "other" : "documents",
+            "Documents", copy, copy == "old" ? now.addDays(-1) : now};
+        QVERIFY2(engine.backup({source.path()}, root + "/" + copy, {}, metadata, local, &manifest, &error), qPrintable(error));
+        QDir(QFileInfo(manifest).absolutePath()).removeRecursively();
+    }
+    QVERIFY(QDir().mkpath(remote.filePath("backups/another-computer/Photos/copy")));
+    RecordingProvider provider;
+    provider.local = std::make_unique<LocalProvider>(remote.path());
+    QVector<RemoteCopy> copies;
+    QVERIFY2(BackupCatalog::discoverCopies(provider, root, "documents", &copies, &error), qPrintable(error));
+    QCOMPARE(copies.size(), 2);
+    QCOMPARE(BackupCleanup::eligibleTargets(copies, 1, "computer", "documents"), QStringList {root + "/old"});
+    QCOMPARE(provider.calls.count("list:" + root), 1);
+    QCOMPARE(provider.calls.size(), 6); // One listing, three manifests, two payload metadata checks.
+    for (const QString &call : provider.calls) QVERIFY(!call.contains("another-computer"));
+    QVERIFY(!provider.calls.contains("list:" + root + "/new/nested"));
+
+    QVERIFY(QFile::remove(remote.filePath(root + "/new/nested/notes.txt")));
+    provider.calls.clear();
+    error.clear();
+    QVERIFY(BackupCatalog::discoverCopies(provider, root, "documents", &copies, &error));
+    // A missing payload in the newest copy cannot evict the surviving old copy.
+    QVERIFY(BackupCleanup::eligibleTargets(copies, 1, "computer", "documents").isEmpty());
+    QVERIFY(!copies.first().complete());
+    QCOMPARE(copies.first().unavailableItems, QStringList {"nested/notes.txt"});
+}
 
 void RetentionDiscoveryTest::keepsNewestSuccessfulCopiesAndIncompleteCopiesAreEligible()
 {

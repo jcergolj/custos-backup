@@ -36,7 +36,7 @@ class BackupRunStore final
 public:
     explicit BackupRunStore(QString path);
 
-    bool load(QString *error = nullptr);
+    bool load(QString *error = nullptr, QByteArray *contents = nullptr);
     bool save(QString *error = nullptr) const;
     QString filePath() const;
     QVector<BackupRunRecord> &records();

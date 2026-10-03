@@ -56,11 +56,12 @@ CleanupStore::CleanupStore(QString path)
 {
 }
 
-bool CleanupStore::load(QString *error)
+bool CleanupStore::load(QString *error, QByteArray *contents)
 {
     cleanupStates.clear();
     QFile file(path);
     if (!file.exists()) {
+        if (contents) *contents = QByteArray(1, '\0');
         return true;
     }
     if (!file.open(QIODevice::ReadOnly)) {
@@ -70,7 +71,8 @@ bool CleanupStore::load(QString *error)
         return false;
     }
     QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    const QByteArray bytes = file.readAll();
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         if (error != nullptr) {
             *error = QStringLiteral("The cleanup state is malformed.");
@@ -88,6 +90,7 @@ bool CleanupStore::load(QString *error)
             object.value(QStringLiteral("last_error")).toString(),
         });
     }
+    if (contents) *contents = QByteArray(1, '\1') + bytes;
     return true;
 }
 

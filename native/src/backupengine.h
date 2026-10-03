@@ -52,4 +52,7 @@ public:
     bool restoreFile(const BackupEntry &entry, const QString &destinationDirectory, BackupProvider &provider, QString *error = nullptr) const;
 
     BackupPreview preview(const QStringList &sourceDirectories, const QStringList &exclusions) const;
+
+private:
+    BackupPreview scan(const QStringList &sourceDirectories, const QStringList &exclusions, bool reportExcluded) const;
 };

@@ -1,15 +1,37 @@
 #include "backupsetcontroller.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QLockFile>
 #include <QSysInfo>
 #include <QLocale>
 #include <QUuid>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 
 namespace {
+
+bool readState(const QString &path, QByteArray *contents, QString *error)
+{
+    QFile file(path);
+    if (!file.exists()) {
+        *contents = QByteArray(1, '\0');
+        return true;
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        *error = QObject::tr("Unable to read local state: %1").arg(file.errorString());
+        return false;
+    }
+    *contents = file.readAll();
+    if (file.error() != QFileDevice::NoError) {
+        *error = QObject::tr("Unable to read local state: %1").arg(file.errorString());
+        return false;
+    }
+    contents->prepend('\1');
+    return true;
+}
 
 bool isRunActive(const QString &status)
 {
@@ -66,10 +88,23 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
     , runStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("omacustos-backup-runs.json")))
     , cleanupStore(QDir(QFileInfo(configPath).absolutePath()).filePath(QStringLiteral("omacustos-backup-cleanup.json")))
 {
+    connect(&previewWatcher, &QFutureWatcher<BackupPreview>::finished, this, [this] {
+        scanInFlight = false;
+        if (activePreviewGeneration != previewGeneration) {
+            if (previewWorking) startPreview();
+            return;
+        }
+        previewResult = previewWatcher.result();
+        hasPreview = true;
+        previewWorking = false;
+        emit previewChanged();
+        emit previewBusyChanged();
+        emit statusChanged(QString());
+    });
     connect(&stateTimer, &QTimer::timeout, this, &BackupSetController::refreshRunState);
     stateTimer.start(5000);
-    runStore.load();
-    cleanupStore.load();
+    runStore.load(nullptr, &runContents);
+    cleanupStore.load(nullptr, &cleanupContents);
     QString error;
     if (store.load(&config, &error)) {
         selectedIndex = config.sets.isEmpty() ? -1 : 0;
@@ -79,6 +114,15 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
         config.protonBinary = qEnvironmentVariable("OMACUSTOS_PROTON_BIN", QStringLiteral("proton-drive"));
         selectedIndex = -1;
     }
+    connect(this, &BackupSetController::setsChanged, this, &BackupSetController::updateDashboard);
+    connect(this, &BackupSetController::setsChanged, this, &BackupSetController::runDetailsChanged);
+    updateDashboard();
+    stateTimer.setInterval(cachedRunningSetIds.isEmpty() ? 5000 : 1000);
+}
+
+BackupSetController::~BackupSetController()
+{
+    previewWatcher.waitForFinished();
 }
 
 QStringList BackupSetController::setNames() const
@@ -113,6 +157,8 @@ int BackupSetController::currentIndex() const
 
 void BackupSetController::setCurrentIndex(int index)
 {
+    const int nextIndex = config.sets.isEmpty() ? -1 : qBound(0, index, config.sets.size() - 1);
+    if (nextIndex == selectedIndex) return;
     if (config.sets.isEmpty()) {
         selectedIndex = -1;
     } else {
@@ -133,6 +179,7 @@ QString BackupSetController::currentName() const
 void BackupSetController::setCurrentName(const QString &name)
 {
     if (BackupSet *set = currentSet()) {
+        if (set->name == name) return;
         set->name = name;
         emit setsChanged();
         emit currentSetChanged();
@@ -162,7 +209,9 @@ QStringList BackupSetController::currentSources() const
 void BackupSetController::setCurrentSources(const QStringList &sources)
 {
     if (BackupSet *set = currentSet()) {
+        if (set->sourceDirectories == sources) return;
         set->sourceDirectories = sources;
+        clearPreview();
         emit currentSetChanged();
     }
 }
@@ -176,7 +225,9 @@ QStringList BackupSetController::currentExclusions() const
 void BackupSetController::setCurrentExclusions(const QStringList &exclusions)
 {
     if (BackupSet *set = currentSet()) {
+        if (set->exclusions == exclusions) return;
         set->exclusions = exclusions;
+        clearPreview();
         emit currentSetChanged();
     }
 }
@@ -306,6 +357,11 @@ QString BackupSetController::currentRunError() const
 
 QStringList BackupSetController::runningSetIds() const
 {
+    return cachedRunningSetIds;
+}
+
+QStringList BackupSetController::calculateRunningSetIds() const
+{
     QStringList ids;
     for (const BackupSet &set : config.sets) {
         const BackupRunRecord *record = runStore.find(set.id);
@@ -317,6 +373,11 @@ QStringList BackupSetController::runningSetIds() const
 }
 
 QVariantMap BackupSetController::remainingTimes() const
+{
+    return cachedRemainingTimes;
+}
+
+QVariantMap BackupSetController::calculateRemainingTimes() const
 {
     QVariantMap result;
     const QDateTime now = QDateTime::currentDateTimeUtc();
@@ -352,26 +413,15 @@ QVariantMap BackupSetController::remainingTimes() const
 
 QStringList BackupSetController::recentBackups() const
 {
-    QStringList summaries;
-    for (const int index : recentBackupIndexes()) {
-        const BackupSet &set = config.sets.at(index);
-        const BackupRunRecord *record = runStore.find(set.id);
-        if (record == nullptr) {
-            summaries.append(QStringLiteral("%1\n%2").arg(set.name, QStringLiteral("No backup run yet")));
-            continue;
-        }
-
-        QString detail = statusLabel(record->status);
-        if (!record->result.manifestVerified && !record->lastError.isEmpty()) {
-            detail += QStringLiteral(" | %1").arg(record->lastError);
-        }
-        summaries.append(QStringLiteral("%1\n%2").arg(set.name, detail));
-    }
-
-    return summaries;
+    return cachedRecentBackups;
 }
 
 QVariantMap BackupSetController::transferProgress() const
+{
+    return cachedTransferProgress;
+}
+
+QVariantMap BackupSetController::calculateTransferProgress() const
 {
     QVariantMap result;
     for (const BackupSet &set : config.sets) {
@@ -433,35 +483,12 @@ QVariantMap BackupSetController::runDetails() const
 
 QStringList BackupSetController::recentBackupSetIds() const
 {
-    QStringList ids;
-    for (const int index : recentBackupIndexes()) {
-        ids.append(config.sets.at(index).id);
-    }
-    return ids;
+    return cachedRecentSetIds;
 }
 
 QStringList BackupSetController::recentBackupTimestamps() const
 {
-    QStringList timestamps;
-    for (const int index : recentBackupIndexes()) {
-        const BackupRunRecord *record = runStore.find(config.sets.at(index).id);
-        if (record == nullptr) {
-            timestamps.append(QString());
-            continue;
-        }
-
-        QDateTime latest = record->lastSuccess;
-        if (record->lastFailure > latest) {
-            latest = record->lastFailure;
-        }
-        if (record->lastScheduled > latest) {
-            latest = record->lastScheduled;
-        }
-        timestamps.append(latest.isValid()
-            ? latest.toLocalTime().toString(QStringLiteral("dd/MM/yyyy HH:mm:ss"))
-            : QString());
-    }
-    return timestamps;
+    return cachedRecentTimestamps;
 }
 
 QString BackupSetController::recentBackupFolderPath(const QString &setId) const
@@ -526,7 +553,6 @@ void BackupSetController::addSet()
     emit setsChanged();
     emit currentIndexChanged();
     emit currentSetChanged();
-    emit dashboardChanged();
     clearPreview();
 }
 
@@ -563,7 +589,6 @@ void BackupSetController::removeSet(int index)
     emit setsChanged();
     emit currentIndexChanged();
     emit currentSetChanged();
-    emit dashboardChanged();
     clearPreview();
     emit statusChanged(QStringLiteral("Backup set removed."));
     emit configurationSaved();
@@ -579,10 +604,26 @@ void BackupSetController::preview()
         return;
     }
 
-    previewResult = engine.preview(set->sourceDirectories, set->exclusions);
-    hasPreview = true;
-    emit previewChanged();
-    emit statusChanged(QString());
+    pendingSources = set->sourceDirectories;
+    pendingExclusions = set->exclusions;
+    ++previewGeneration;
+    if (!previewWorking) {
+        previewWorking = true;
+        emit previewBusyChanged();
+    }
+    if (!scanInFlight) startPreview();
+}
+
+void BackupSetController::startPreview()
+{
+    activePreviewGeneration = previewGeneration;
+    scanInFlight = true;
+    const auto sources = pendingSources;
+    const auto exclusions = pendingExclusions;
+    BackupEngine *worker = &engine;
+    previewWatcher.setFuture(QtConcurrent::run([worker, sources, exclusions] {
+        return worker->preview(sources, exclusions);
+    }));
 }
 
 bool BackupSetController::save()
@@ -656,7 +697,6 @@ bool BackupSetController::importSets(const QString &filePath)
     emit setsChanged();
     emit currentIndexChanged();
     emit currentSetChanged();
-    emit dashboardChanged();
     emit statusChanged(QStringLiteral("Backup sets imported."));
     emit configurationSaved();
     return true;
@@ -728,6 +768,11 @@ QVector<int> BackupSetController::recentBackupIndexes() const
 
 void BackupSetController::clearPreview()
 {
+    ++previewGeneration;
+    if (previewWorking) {
+        previewWorking = false;
+        emit previewBusyChanged();
+    }
     previewResult = {};
     hasPreview = false;
     emit previewChanged();
@@ -735,12 +780,79 @@ void BackupSetController::clearPreview()
 
 void BackupSetController::refreshRunState()
 {
-    if (runStore.load()) {
-        stateTimer.setInterval(runningSetIds().isEmpty() ? 5000 : 1000);
+    // Store loaders mutate their snapshots even when parsing fails. Publish a
+    // replacement only on success, retaining last-good display data on failure.
+    BackupRunStore nextRuns(runStore.filePath());
+    CleanupStore nextCleanup(cleanupStore.filePath());
+    QString runError, cleanupError;
+    QByteArray nextRunContents, nextCleanupContents;
+    if (readState(runStore.filePath(), &nextRunContents, &runError)
+        && nextRunContents != runContents && nextRuns.load(&runError, &nextRunContents)) {
+        runStore = std::move(nextRuns);
+        runContents = nextRunContents;
         emit runStateChanged();
-        emit dashboardChanged();
+        emit runDetailsChanged();
     }
-    if (cleanupStore.load()) {
+    if (readState(cleanupStore.filePath(), &nextCleanupContents, &cleanupError)
+        && nextCleanupContents != cleanupContents && nextCleanup.load(&cleanupError, &nextCleanupContents)) {
+        cleanupStore = std::move(nextCleanup);
+        cleanupContents = nextCleanupContents;
         emit cleanupChanged();
     }
+    updateDashboard();
+    stateTimer.setInterval(cachedRunningSetIds.isEmpty() ? 5000 : 1000);
+    const QString nextError = (runError + QStringLiteral(" ") + cleanupError).trimmed();
+    if (refreshError != nextError) {
+        refreshError = nextError;
+        emit dashboardRefreshChanged();
+    }
+}
+
+void BackupSetController::updateDashboard()
+{
+    const auto running = calculateRunningSetIds();
+    const auto remaining = calculateRemainingTimes();
+    const auto transfer = calculateTransferProgress();
+    QStringList summaries, ids, timestamps;
+    QVariantMap runSummaries;
+    // Sort once per refresh, and keep expensive issue conversion out of row bindings.
+    for (const int index : recentBackupIndexes()) {
+        const BackupSet &set = config.sets.at(index);
+        ids.append(set.id);
+        const BackupRunRecord *record = runStore.find(set.id);
+        if (record == nullptr) {
+            summaries.append(QStringLiteral("%1\nNo backup run yet").arg(set.name));
+            timestamps.append(QString());
+            continue;
+        }
+        QString detail = statusLabel(record->status);
+        if (!record->result.manifestVerified && !record->lastError.isEmpty()) {
+            detail += QStringLiteral(" | %1").arg(record->lastError);
+        }
+        summaries.append(QStringLiteral("%1\n%2").arg(set.name, detail));
+        const QDateTime latest = qMax(record->lastSuccess, qMax(record->lastFailure, record->lastScheduled));
+        timestamps.append(latest.isValid()
+            ? latest.toLocalTime().toString(QStringLiteral("dd/MM/yyyy HH:mm:ss")) : QString());
+        runSummaries.insert(set.id, QVariantMap {
+            {QStringLiteral("status"), statusLabel(record->status)},
+            {QStringLiteral("summary"), record->result.reported && record->result.manifestVerified
+                ? resultSummary(record->result) : QString()},
+        });
+    }
+    const bool runningChanged = running != cachedRunningSetIds;
+    const bool remainingChanged = remaining != cachedRemainingTimes;
+    const bool transferChanged = transfer != cachedTransferProgress;
+    const bool recentChanged = summaries != cachedRecentBackups || ids != cachedRecentSetIds
+        || timestamps != cachedRecentTimestamps || runSummaries != cachedRunSummaries;
+    cachedRunningSetIds = running;
+    cachedRemainingTimes = remaining;
+    cachedTransferProgress = transfer;
+    cachedRecentBackups = summaries;
+    cachedRecentSetIds = ids;
+    cachedRecentTimestamps = timestamps;
+    cachedRunSummaries = runSummaries;
+    if (runningChanged) emit runningSetIdsChanged();
+    if (remainingChanged) emit remainingTimesChanged();
+    if (transferChanged) emit transferProgressChanged();
+    if (recentChanged) emit dashboardChanged();
 }

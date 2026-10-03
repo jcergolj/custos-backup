@@ -73,11 +73,12 @@ BackupRunStore::BackupRunStore(QString path)
 {
 }
 
-bool BackupRunStore::load(QString *error)
+bool BackupRunStore::load(QString *error, QByteArray *contents)
 {
     runRecords.clear();
     QFile file(path);
     if (!file.exists()) {
+        if (contents) *contents = QByteArray(1, '\0');
         return true;
     }
     if (!file.open(QIODevice::ReadOnly)) {
@@ -88,7 +89,8 @@ bool BackupRunStore::load(QString *error)
     }
 
     QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    const QByteArray bytes = file.readAll();
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         if (error != nullptr) {
             *error = QStringLiteral("The backup run state is malformed.");
@@ -154,6 +156,7 @@ bool BackupRunStore::load(QString *error)
         runRecords.append(record);
     }
 
+    if (contents) *contents = QByteArray(1, '\1') + bytes;
     return true;
 }
 

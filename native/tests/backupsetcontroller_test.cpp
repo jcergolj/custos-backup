@@ -8,6 +8,11 @@
 #include <QSysInfo>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QSemaphore>
+#include <QScopeGuard>
+#include <QThreadPool>
+#include <QTimer>
+#include <QtConcurrentRun>
 
 #include "../src/backupsetcontroller.h"
 
@@ -20,6 +25,9 @@ private slots:
     void previewUpdatesFilesWithoutCountMessage();
     void previewGroupsAreReadOnlyAndResetWithSelection_data();
     void previewGroupsAreReadOnlyAndResetWithSelection();
+    void previewKeepsInputAvailableAndDiscardsSupersededSelection();
+    void failedDashboardRefreshRetainsLastSuccessfulData();
+    void unchangedPollingDoesNotResetDashboardAndProgressUpdatesStaySeparate();
     void recentBackupTimestampIncludesLocalDateAndSeconds();
     void folderPathUsesBackupIdentityAndWorkerNaming();
     void deletedCopyDisappearsFromRecentBackupsButKeepsItsSet();
@@ -35,6 +43,127 @@ private slots:
     void remainingTimeIsReportedForTheRunningSetOnly();
     void reportsVerifiedCountsAndFailureDetailsWithoutInventingLegacyCounts();
 };
+
+void BackupSetControllerTest::unchangedPollingDoesNotResetDashboardAndProgressUpdatesStaySeparate()
+{
+    QTemporaryDir home;
+    BackupConfig config;
+    config.sets = {{"documents", "Documents", "/backups", {"/safe/documents"}, {}}};
+    const QString settings = home.filePath("settings.json");
+    QVERIFY(BackupConfigStore(settings).save(config));
+    BackupRunStore runs(home.filePath("omacustos-backup-runs.json"));
+    runs.ensureSet("documents");
+    auto &record = *runs.find("documents");
+    runs.markRunning(record);
+    record.progress = {100, 10, 10, 1, false};
+    record.progressElapsedMs = 1000;
+    record.progressUpdatedAt = QDateTime::currentDateTimeUtc();
+    QVERIFY(runs.save());
+    BackupEngine engine;
+    BackupSetController controller(engine, settings);
+    QSignalSpy dashboard(&controller, &BackupSetController::dashboardChanged);
+    QSignalSpy state(&controller, &BackupSetController::runStateChanged);
+    QSignalSpy transfer(&controller, &BackupSetController::transferProgressChanged);
+    QSignalSpy cleanup(&controller, &BackupSetController::cleanupChanged);
+    controller.refreshRunState();
+    controller.refreshRunState();
+    QVERIFY(dashboard.isEmpty() && state.isEmpty() && transfer.isEmpty() && cleanup.isEmpty());
+    record.progress.processedFiles = 2;
+    record.progress.processedBytes = 20;
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QCOMPARE(transfer.count(), 1);
+    QCOMPARE(state.count(), 1);
+    QVERIFY(dashboard.isEmpty());
+    QCOMPARE(controller.transferProgress().value("documents").toMap().value("fraction").toDouble(), 0.2);
+    runs.markSuccess(record, QDateTime::currentDateTimeUtc());
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QCOMPARE(dashboard.count(), 1);
+    QVERIFY(controller.runningSetIds().isEmpty());
+    QCOMPARE(controller.recentBackups().first(), QString("Documents\nSuccessful"));
+    // An empty file differs from an absent file, and failures retain the snapshot.
+    QFile file(runs.filePath());
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.close();
+    controller.refreshRunState();
+    QVERIFY(!controller.dashboardRefreshError().isEmpty());
+    QCOMPARE(dashboard.count(), 1);
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QVERIFY(controller.dashboardRefreshError().isEmpty());
+    QCOMPARE(dashboard.count(), 1);
+}
+
+void BackupSetControllerTest::failedDashboardRefreshRetainsLastSuccessfulData()
+{
+    QTemporaryDir home;
+    BackupConfig config;
+    config.sets = {{"documents", "Documents", "/backups", {"/safe/documents"}, {}}};
+    const QString settings = home.filePath("settings.json");
+    QVERIFY(BackupConfigStore(settings).save(config));
+    BackupRunStore runs(home.filePath("omacustos-backup-runs.json"));
+    runs.ensureSet("documents");
+    runs.markSuccess(*runs.find("documents"), QDateTime::currentDateTimeUtc());
+    QVERIFY(runs.save());
+    BackupEngine engine;
+    BackupSetController controller(engine, settings);
+    const auto timestamps = controller.recentBackupTimestamps();
+    QFile state(runs.filePath());
+    QVERIFY(state.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    state.write("{");
+    state.close();
+    controller.refreshRunState();
+    QCOMPARE(controller.recentBackupTimestamps(), timestamps);
+    QVERIFY(!controller.property("dashboardRefreshError").toString().isEmpty());
+    QVERIFY(runs.save());
+    controller.refreshRunState();
+    QVERIFY(controller.property("dashboardRefreshError").toString().isEmpty());
+}
+
+void BackupSetControllerTest::previewKeepsInputAvailableAndDiscardsSupersededSelection()
+{
+    QTemporaryDir home;
+    QVERIFY(home.isValid());
+    QFile source(home.filePath("notes.txt"));
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    source.write("notes");
+    source.close();
+    BackupEngine engine;
+    // Hold the executor so the scan is deterministically pending while the UI
+    // changes selection. Assert public results and event-loop availability.
+    QThreadPool *pool = QThreadPool::globalInstance();
+    const int previousLimit = pool->maxThreadCount();
+    pool->setMaxThreadCount(1);
+    QSemaphore entered, release;
+    auto blocked = QtConcurrent::run([&] { entered.release(); release.acquire(); });
+    entered.acquire();
+    BackupSetController controller(engine, home.filePath("settings.json"));
+    const auto unblock = qScopeGuard([&] {
+        release.release();
+        blocked.waitForFinished();
+        pool->setMaxThreadCount(previousLimit);
+    });
+    controller.addSet();
+    controller.setCurrentSources({source.fileName()});
+    controller.preview();
+    QVERIFY(!controller.previewAvailable());
+    QVERIFY(controller.property("previewBusy").toBool());
+    bool heartbeat = false;
+    QTimer::singleShot(0, &controller, [&] { heartbeat = true; });
+    QTRY_VERIFY(heartbeat);
+    controller.addSet();
+    controller.setCurrentSources({home.filePath("missing.txt")});
+    controller.preview();
+    QVERIFY(!controller.previewAvailable());
+    release.release();
+    QTRY_VERIFY(controller.previewAvailable());
+    QVERIFY(!controller.property("previewBusy").toBool());
+    QVERIFY(controller.previewIncluded().isEmpty());
+    QCOMPARE(controller.previewMissing(), QStringList {home.filePath("missing.txt")});
+    controller.setCurrentSources({source.fileName()});
+    QVERIFY(!controller.previewAvailable());
+}
 
 void BackupSetControllerTest::remainingTimeIsReportedForTheRunningSetOnly()
 {
@@ -173,7 +302,7 @@ void BackupSetControllerTest::previewUpdatesFilesWithoutCountMessage()
     QVERIFY(!controller.previewAvailable());
     controller.preview();
 
-    QVERIFY(controller.previewAvailable());
+    QTRY_VERIFY(controller.previewAvailable());
     QCOMPARE(previewSpy.count(), 1);
     QCOMPARE(controller.previewIncluded(), hasSource ? QStringList {source.fileName()} : QStringList {});
     QCOMPARE(statusSpy.count(), 1);
@@ -222,7 +351,7 @@ void BackupSetControllerTest::previewGroupsAreReadOnlyAndResetWithSelection()
     QSignalSpy saved(&controller, &BackupSetController::configurationSaved);
     controller.preview();
 
-    QVERIFY(controller.previewAvailable());
+    QTRY_VERIFY(controller.previewAvailable());
     QCOMPARE(controller.previewIncluded(), mixed ? QStringList {included} : QStringList {});
     QCOMPARE(controller.previewExcluded(), mixed ? QStringList {excluded} : QStringList {});
     QCOMPARE(controller.previewSkipped(), QStringList {skipped});
@@ -240,7 +369,7 @@ void BackupSetControllerTest::previewGroupsAreReadOnlyAndResetWithSelection()
     QVERIFY(controller.previewSkipped().isEmpty());
     QVERIFY(controller.previewMissing().isEmpty());
     controller.preview();
-    QVERIFY(controller.previewAvailable());
+    QTRY_VERIFY(controller.previewAvailable());
     QCOMPARE(controller.previewIncluded(), QStringList {included});
     controller.addSet();
     QVERIFY(!controller.previewAvailable());

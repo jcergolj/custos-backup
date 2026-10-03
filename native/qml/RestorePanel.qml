@@ -11,7 +11,14 @@ GroupBox {
     property var selectedIndexes: []
     property var selectedPaths: []
     property int selectedCopyIndex: -1
+    property string selectedCopyPath: ""
+    property var selectionLookup: ({})
+    property var contextStates: ({})
+    property string contextKey: ""
+    property real screenScrollY: -1
+    property bool restoringContext: false
     signal completed()
+    signal closeRequested()
 
     objectName: "restorePanel"
     title: qsTr("Restore")
@@ -27,17 +34,81 @@ GroupBox {
         selectedIndexes = []
         selectedPaths = []
         selectedCopyIndex = -1
+        selectedCopyPath = ""
         destinationField.text = ""
+        restoreList.contentY = 0
+        screenScrollY = -1
     }
 
-    function focusSearch() {
-        restoreCopySearch.forceActiveFocus()
+    function rememberContext() {
+        if (contextKey.length === 0) return
+        contextStates[contextKey] = {
+            paths: selectedPaths.slice(), indexes: selectedIndexes.slice(),
+            copyPath: selectedCopyPath, copyIndex: selectedCopyIndex,
+            destination: destinationField.text, fileScroll: restoreList.contentY,
+            screenScroll: screenScrollY
+        }
+    }
+
+    function activateContext(folder, setId) {
+        const key = JSON.stringify([folder, setId])
+        rememberContext()
+        if (contextKey === key) return
+        restoringContext = true
+        contextKey = key
+        reset()
+        const state = contextStates[key]
+        if (state) {
+            selectedPaths = state.paths
+            selectedIndexes = state.indexes
+            selectedCopyPath = state.copyPath
+            selectedCopyIndex = state.copyIndex
+            destinationField.text = state.destination
+            screenScrollY = state.screenScroll
+            Qt.callLater(function () {
+                if (panel && panel.contextKey === key) restoreList.contentY = state.fileScroll
+            })
+        }
+        restoringContext = false
+    }
+
+    onSelectedIndexesChanged: {
+        const lookup = Object.create(null)
+        selectedIndexes.forEach(function (index) { lookup[index] = true })
+        selectionLookup = lookup
+    }
+
+    function focusSearch(viewport) {
+        function inView(control) {
+            if (!control.visible || !control.enabled) return false
+            const position = control.mapToItem(viewport, 0, 0)
+            return position.y >= 0 && position.y + control.height <= viewport.height
+        }
+        function firstVisibleControl(item) {
+            if (item.activeFocusOnTab && inView(item)) return item
+            for (const child of item.children || []) {
+                const control = firstVisibleControl(child)
+                if (control) return control
+            }
+            return null
+        }
+        const target = inView(restoreCopySearch) ? restoreCopySearch : firstVisibleControl(panel)
+        if (target) target.forceActiveFocus()
+        else viewport.forceActiveFocus()
     }
 
     ColumnLayout {
         id: restoreContent
         anchors.fill: parent
         spacing: 16
+
+        ActionButton {
+            style: panel.style
+            objectName: "closeRestoreButton"
+            text: qsTr("Back to dashboard")
+            Layout.alignment: Qt.AlignRight
+            onClicked: panel.closeRequested()
+        }
 
         Label {
             objectName: "restoreInstructions"
@@ -54,7 +125,6 @@ GroupBox {
             objectName: "restoreCopySearch"
             placeholderText: qsTr("Search computer, backup name, copy, or status")
             text: panel.controller.copySearch
-            enabled: !panel.controller.busy
             onTextChanged: panel.controller.copySearch = text
             Layout.fillWidth: true
         }
@@ -64,13 +134,12 @@ GroupBox {
             objectName: "restoreCopySelector"
             model: panel.controller.copies
             currentIndex: panel.controller.currentCopyIndex
-            enabled: !panel.controller.busy && count > 0
+            enabled: count > 0
             Layout.fillWidth: true
-            onModelChanged: {
-                if (panel.controller.currentCopyIndex < 0) {
-                    currentIndex = -1
-                }
-            }
+            // ComboBox defaults to row zero when its model grows. Reapply the
+            // controller binding so initial listing keeps an explicit choice,
+            // and refreshed/cached selections continue to follow copy identity.
+            onModelChanged: currentIndex = Qt.binding(function () { return panel.controller.currentCopyIndex })
             onActivated: {
                 if (panel.selectedCopyIndex !== currentIndex) {
                     panel.selectedIndexes = []
@@ -100,6 +169,14 @@ GroupBox {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+        }
+
+        Label {
+            objectName: "restoreRefreshError"
+            text: qsTr("Refresh failed: %1").arg(panel.controller.browseError)
+            visible: panel.controller.browseError.length > 0
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
 
         Label {
@@ -151,13 +228,14 @@ GroupBox {
             Layout.fillWidth: true
             Layout.preferredHeight: count > 0 ? Math.max(48, Math.min(180, contentHeight)) : 0
             clip: true
+            ScrollBar.vertical: ScrollBar {}
             delegate: CheckBox {
                 required property int index
                 required property string modelData
                 objectName: "restoreFile-" + index
                 text: modelData
                 width: restoreList.width
-                checked: panel.selectedIndexes.indexOf(index) >= 0
+                checked: panel.selectionLookup[index] === true
                 onToggled: {
                     let selected = panel.selectedIndexes.slice()
                     const position = selected.indexOf(index)
@@ -167,8 +245,9 @@ GroupBox {
                         selected.splice(position, 1)
                     }
                     panel.selectedIndexes = selected
+                    const entries = panel.controller.entries
                     panel.selectedPaths = selected.map(function (selectedIndex) {
-                        return panel.controller.entries[selectedIndex]
+                        return entries[selectedIndex]
                     })
                 }
             }
@@ -245,31 +324,41 @@ GroupBox {
 
     Connections {
         target: panel.controller
-        function onRestoreCompleted() {
+        function onRestoreCompletedForContext(folder, setId, copyPath) {
+            if (panel.contextKey !== JSON.stringify([folder, setId])
+                || panel.selectedCopyPath !== copyPath) return
             panel.reset()
+            delete panel.contextStates[panel.contextKey]
             panel.completed()
         }
         function onEntriesChanged() {
+            if (panel.restoringContext) return
+            const entries = panel.controller.entries
             const paths = panel.selectedPaths.length > 0
                 ? panel.selectedPaths : panel.selectedIndexes.map(function (index) {
-                    return panel.controller.entries[index]
+                    return entries[index]
                 })
-            if (panel.controller.entries.length === 0 && panel.controller.busy) {
+            if (entries.length === 0 && panel.controller.browsing) {
                 return
             }
+            const indexesByPath = Object.create(null)
+            entries.forEach(function (path, index) { indexesByPath[path] = index })
             panel.selectedIndexes = paths.map(function (path) {
-                return panel.controller.entries.indexOf(path)
+                return indexesByPath[path] === undefined ? -1 : indexesByPath[path]
             }).filter(function (index) { return index >= 0 })
             panel.selectedPaths = panel.selectedIndexes.map(function (index) {
-                return panel.controller.entries[index]
+                return entries[index]
             })
         }
         function onCurrentCopyIndexChanged() {
-            if (panel.selectedCopyIndex !== panel.controller.currentCopyIndex) {
+            if (panel.restoringContext) return
+            const path = panel.controller.currentCopyPath
+            if (panel.selectedCopyPath !== path && !(path.length === 0 && panel.controller.browsing)) {
                 panel.selectedIndexes = []
                 panel.selectedPaths = []
-                panel.selectedCopyIndex = panel.controller.currentCopyIndex
+                panel.selectedCopyPath = path
             }
+            panel.selectedCopyIndex = panel.controller.currentCopyIndex
         }
     }
 }

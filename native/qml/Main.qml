@@ -15,6 +15,7 @@ ApplicationWindow {
     property bool showEditor: false
     property bool showRestore: false
     property string notificationMessage: ""
+    property real dashboardReturnY: 0
 
     // Keep the window's dashboard/test API while state lives with its presentation.
     property alias selectedRestoreIndexes: restorePanel.selectedIndexes
@@ -84,15 +85,13 @@ ApplicationWindow {
 
     function createNewSet() {
         backupSetController.addSet()
-        loadCurrentSet()
         showAdvanced = false
         showEditor = true
+        Qt.callLater(function () { backupEditor.focusName() })
     }
 
     function editSet(index) {
         backupSetController.currentIndex = index
-        loadCurrentSet()
-        showAdvanced = false
         showEditor = true
         Qt.callLater(function () { backupEditor.focusName() })
     }
@@ -104,14 +103,26 @@ ApplicationWindow {
             return
         }
 
-        backupSetController.currentIndex = setIndex
-        restorePanel.reset()
+        openRestoreContext(backupSetController.recentBackupFolderPath(setId), setId)
+    }
+
+    function openRestoreContext(folder, setId) {
+        if (showRestore) {
+            restorePanel.screenScrollY = dashboardScrollView.contentItem.contentY
+        } else {
+            dashboardReturnY = dashboardScrollView.contentItem.contentY
+        }
+        restorePanel.activateContext(folder, setId)
+        showEditor = false
         showRestore = true
-        restoreController.discover(backupSetController.recentBackupFolderPath(setId), setId)
+        restoreController.discover(folder, setId)
         Qt.callLater(function () {
-            restorePanel.focusSearch()
-            dashboardScrollView.contentItem.contentY = Math.max(0,
-                restorePanel.mapToItem(dashboardScrollView.contentItem, 0, 0).y)
+            if (!root || !root.showRestore || root.showEditor
+                || restoreController.backupId !== setId || restoreController.backupFolder !== folder) return
+            dashboardScrollView.contentItem.contentY = restorePanel.screenScrollY >= 0
+                ? restorePanel.screenScrollY : Math.max(0,
+                    restorePanel.mapToItem(dashboardScrollView.contentItem, 0, 0).y)
+            restorePanel.focusSearch(dashboardScrollView)
         })
     }
 
@@ -271,7 +282,16 @@ ApplicationWindow {
         objectName: "backupDetailsDialog"
         anchors.centerIn: parent
         property string setId: ""
-        readonly property var details: backupSetController.runDetails[setId] || ({})
+        property var details: ({})
+        onOpened: details = backupSetController.backupDetails(setId)
+
+        Connections {
+            target: backupSetController
+            function onRunStateChanged() {
+                if (backupDetailsDialog.opened)
+                    backupDetailsDialog.details = backupSetController.backupDetails(backupDetailsDialog.setId)
+            }
+        }
         title: qsTr("Backup details")
         width: Math.min(root.width - 2 * root.contentPadding, 640)
         height: Math.min(root.height - 2 * root.contentPadding, 500)
@@ -463,6 +483,45 @@ ApplicationWindow {
             }
         }
 
+        RowLayout {
+            visible: restoreController.restoring || backupSetController.runningSetIds.length > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: root.contentPadding
+            Layout.rightMargin: root.contentPadding
+            Layout.bottomMargin: 12
+
+            Label {
+                objectName: "activeRestoreProgress"
+                text: restoreController.restoring
+                    ? qsTr("Restoring %1 — %2").arg(restoreController.restoreBackupId).arg(restoreController.restoreProgress)
+                    : qsTr("%1 backup(s) running").arg(backupSetController.runningSetIds.length)
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            ActionButton {
+                style: uiStyle
+                objectName: "returnToRestoreButton"
+                text: restoreController.restoring ? qsTr("View restore") : qsTr("View backups")
+                onClicked: {
+                    if (restoreController.restoring) {
+                        root.openRestoreContext(restoreController.restoreBackupFolder, restoreController.restoreBackupId)
+                    } else {
+                        root.showEditor = false
+                    }
+                }
+            }
+        }
+
+        Label {
+            objectName: "dashboardRefreshError"
+            visible: backupSetController.dashboardRefreshError.length > 0
+            text: qsTr("Showing last-successful backup information. Refresh failed: %1").arg(backupSetController.dashboardRefreshError)
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Layout.leftMargin: root.contentPadding
+            Layout.rightMargin: root.contentPadding
+        }
+
         StackLayout {
             currentIndex: root.showEditor ? 1 : 0
             Layout.fillWidth: true
@@ -509,6 +568,12 @@ ApplicationWindow {
                         onCompleted: {
                             root.showRestore = false
                             dashboardScrollView.contentItem.contentY = 0
+                        }
+                        onCloseRequested: {
+                            restorePanel.screenScrollY = dashboardScrollView.contentItem.contentY
+                            restorePanel.rememberContext()
+                            root.showRestore = false
+                            dashboardScrollView.contentItem.contentY = root.dashboardReturnY
                         }
                     }
                 }

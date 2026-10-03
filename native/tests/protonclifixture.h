@@ -21,6 +21,7 @@ public:
 
     QTemporaryDir remote;
     QStringList uploadedPaths;
+    QVector<QStringList> calls;
     QStringList downloadedFolders;
     QStringList trashedPaths;
     QString failUploadName;
@@ -35,6 +36,7 @@ public:
 
     ProcessOutput run(const QStringList &arguments) override
     {
+        calls.append(arguments);
         if (arguments.size() < 3 || arguments.first() != QStringLiteral("filesystem")) {
             return failure("Invalid CLI command");
         }
@@ -171,6 +173,9 @@ private:
         if (!QFile::copy(source, destination)) return failure("Transfer failed");
         if (injected != Failure::None) {
             QFile file(destination);
+            // Local staging is read-only, but remote failure injection must be
+            // able to alter the copied bytes regardless of POSIX source modes.
+            if (!file.setPermissions(file.permissions() | QFileDevice::WriteOwner)) return failure("Failure injection failed");
             if (!file.open(QIODevice::ReadWrite)) return failure("Failure injection failed");
             if (injected == Failure::CorruptOutput) {
                 if (file.size() == 0 || file.write("!") != 1) return failure("Failure injection failed");

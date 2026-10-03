@@ -6,6 +6,7 @@
 #include "backupecleanup.h"
 
 #include <QObject>
+#include <QFutureWatcher>
 #include <QStringList>
 #include <QTimer>
 #include <QVector>
@@ -31,14 +32,17 @@ class BackupSetController final : public QObject
     Q_PROPERTY(QString currentNextRun READ currentNextRun NOTIFY currentSetChanged)
     Q_PROPERTY(QString currentRunStatus READ currentRunStatus NOTIFY runStateChanged)
     Q_PROPERTY(QString currentRunError READ currentRunError NOTIFY runStateChanged)
-    Q_PROPERTY(QStringList runningSetIds READ runningSetIds NOTIFY dashboardChanged)
-    Q_PROPERTY(QVariantMap remainingTimes READ remainingTimes NOTIFY dashboardChanged)
-    Q_PROPERTY(QVariantMap transferProgress READ transferProgress NOTIFY dashboardChanged)
-    Q_PROPERTY(QVariantMap runDetails READ runDetails NOTIFY dashboardChanged)
+    Q_PROPERTY(QStringList runningSetIds READ runningSetIds NOTIFY runningSetIdsChanged)
+    Q_PROPERTY(QVariantMap remainingTimes READ remainingTimes NOTIFY remainingTimesChanged)
+    Q_PROPERTY(QVariantMap transferProgress READ transferProgress NOTIFY transferProgressChanged)
+    Q_PROPERTY(QVariantMap runDetails READ runDetails NOTIFY runDetailsChanged)
+    Q_PROPERTY(QVariantMap runSummaries READ runSummaries NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackups READ recentBackups NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackupSetIds READ recentBackupSetIds NOTIFY dashboardChanged)
     Q_PROPERTY(QStringList recentBackupTimestamps READ recentBackupTimestamps NOTIFY dashboardChanged)
+    Q_PROPERTY(QString dashboardRefreshError READ dashboardRefreshError NOTIFY dashboardRefreshChanged)
     Q_PROPERTY(bool previewAvailable READ previewAvailable NOTIFY previewChanged)
+    Q_PROPERTY(bool previewBusy READ previewBusy NOTIFY previewBusyChanged)
     Q_PROPERTY(QStringList previewIncluded READ previewIncluded NOTIFY previewChanged)
     Q_PROPERTY(QStringList previewExcluded READ previewExcluded NOTIFY previewChanged)
     Q_PROPERTY(QStringList previewSkipped READ previewSkipped NOTIFY previewChanged)
@@ -48,6 +52,7 @@ class BackupSetController final : public QObject
 
 public:
     explicit BackupSetController(BackupEngine &engine, QString configPath, QObject *parent = nullptr);
+    ~BackupSetController() override;
 
     QStringList setNames() const;
     QStringList setIds() const;
@@ -83,10 +88,13 @@ public:
     QVariantMap remainingTimes() const;
     QVariantMap transferProgress() const;
     QVariantMap runDetails() const;
+    QVariantMap runSummaries() const { return cachedRunSummaries; }
     QStringList recentBackups() const;
     QStringList recentBackupSetIds() const;
     QStringList recentBackupTimestamps() const;
+    QString dashboardRefreshError() const { return refreshError; }
     bool previewAvailable() const;
+    bool previewBusy() const { return previewWorking; }
     QStringList previewIncluded() const;
     QStringList previewExcluded() const;
     QStringList previewSkipped() const;
@@ -111,8 +119,14 @@ signals:
     void currentIndexChanged();
     void currentSetChanged();
     void previewChanged();
+    void previewBusyChanged();
     void runStateChanged();
     void dashboardChanged();
+    void runningSetIdsChanged();
+    void remainingTimesChanged();
+    void transferProgressChanged();
+    void runDetailsChanged();
+    void dashboardRefreshChanged();
     void cleanupChanged();
     void configurationSaved();
     void statusChanged(const QString &status);
@@ -123,6 +137,11 @@ private:
     const BackupSet *currentSet() const;
     QVector<int> recentBackupIndexes() const;
     void clearPreview();
+    void startPreview();
+    void updateDashboard();
+    QStringList calculateRunningSetIds() const;
+    QVariantMap calculateRemainingTimes() const;
+    QVariantMap calculateTransferProgress() const;
 
     BackupEngine &engine;
     BackupConfigStore store;
@@ -132,5 +151,22 @@ private:
     int selectedIndex = -1;
     BackupPreview previewResult;
     bool hasPreview = false;
+    bool previewWorking = false;
+    bool scanInFlight = false;
+    quint64 previewGeneration = 0;
+    quint64 activePreviewGeneration = 0;
+    QStringList pendingSources;
+    QStringList pendingExclusions;
+    QFutureWatcher<BackupPreview> previewWatcher;
     QTimer stateTimer;
+    QString refreshError;
+    QByteArray runContents;
+    QByteArray cleanupContents;
+    QStringList cachedRunningSetIds;
+    QStringList cachedRecentBackups;
+    QStringList cachedRecentSetIds;
+    QStringList cachedRecentTimestamps;
+    QVariantMap cachedRemainingTimes;
+    QVariantMap cachedTransferProgress;
+    QVariantMap cachedRunSummaries;
 };

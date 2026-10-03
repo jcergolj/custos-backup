@@ -34,22 +34,38 @@ bool isWithinPath(const QString &path, const QString &root)
         : cleanPath.startsWith(cleanRoot + QDir::separator()));
 }
 
-bool isExcluded(const QFileInfo &file, const QStringList &exclusions)
+struct ExclusionRules {
+    QSet<QString> names;
+    QStringList paths;
+
+    explicit ExclusionRules(const QStringList &exclusions)
+    {
+        for (const QString &exclusion : exclusions) {
+            if (exclusion.trimmed().isEmpty()) continue;
+            const QString rule = QDir::cleanPath(exclusion.trimmed());
+            if (!rule.contains('/') && rule != QStringLiteral(".") && rule != QStringLiteral("..")) {
+                names.insert(rule);
+            } else {
+                paths.append(QDir::cleanPath(cleanAbsolutePath(rule)));
+            }
+        }
+    }
+};
+
+bool isExcluded(const QFileInfo &file, const ExclusionRules &rules)
 {
-    const QString path = file.absoluteFilePath();
+    if (rules.names.isEmpty() && rules.paths.isEmpty()) return false;
+    const QString path = QDir::cleanPath(file.absoluteFilePath());
     QStringList folders = file.absolutePath().split('/', Qt::SkipEmptyParts);
     if (file.isDir() || file.isSymLink()) {
         folders.append(file.fileName());
     }
-    return std::any_of(exclusions.cbegin(), exclusions.cend(), [&path, &folders](const QString &exclusion) {
-        if (exclusion.trimmed().isEmpty()) {
-            return false;
-        }
-        const QString rule = QDir::cleanPath(exclusion.trimmed());
-        if (!rule.contains('/') && rule != QStringLiteral(".") && rule != QStringLiteral("..")) {
-            return folders.contains(rule);
-        }
-        return isWithinPath(path, cleanAbsolutePath(rule));
+    for (const QString &folder : folders) {
+        if (rules.names.contains(folder)) return true;
+    }
+    return std::any_of(rules.paths.cbegin(), rules.paths.cend(), [&path](const QString &root) {
+        return path == root || (root == QStringLiteral("/")
+            ? path.startsWith('/') : path.startsWith(root + QDir::separator()));
     });
 }
 
@@ -168,6 +184,12 @@ QVariantMap BackupEngine::previewSelection(const QStringList &sourceDirectories,
 
 BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const QStringList &exclusions) const
 {
+    return scan(sourceDirectories, exclusions, true);
+}
+
+BackupPreview BackupEngine::scan(const QStringList &sourceDirectories, const QStringList &exclusions, bool reportExcluded) const
+{
+    const ExclusionRules rules(exclusions);
     BackupPreview result;
     QStringList included;
     QStringList excluded;
@@ -180,7 +202,7 @@ BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const 
             missing.append(source.absoluteFilePath());
             continue;
         }
-        if (isExcluded(source, exclusions)) {
+        if (isExcluded(source, rules)) {
             excluded.append(source.absoluteFilePath());
             continue;
         }
@@ -197,25 +219,30 @@ BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const 
             continue;
         }
 
-        QDirIterator iterator(source.absoluteFilePath(), QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot,
-            QDirIterator::Subdirectories);
-        while (iterator.hasNext()) {
-            iterator.next();
-            const QFileInfo file = iterator.fileInfo();
-            const QString path = file.absoluteFilePath();
+        QStringList pending {source.absoluteFilePath()};
+        while (!pending.isEmpty()) {
+            QDirIterator iterator(pending.takeLast(), QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
+            while (iterator.hasNext()) {
+                iterator.next();
+                const QFileInfo file = iterator.fileInfo();
+                const QString path = file.absoluteFilePath();
 
-            if (isExcluded(file, exclusions)) {
-                if (file.isFile() || file.isSymLink()) {
-                    excluded.append(path);
+                if (isExcluded(file, rules)) {
+                    if (reportExcluded && file.isDir() && !file.isSymLink()) pending.append(path);
+                    if (file.isFile() || file.isSymLink()) {
+                        excluded.append(path);
+                    }
+                } else if (file.isSymLink()) {
+                    skipped.append(path);
+                } else if (file.isDir() && !file.isReadable()) {
+                    skipped.append(path);
+                } else if (file.isDir()) {
+                    pending.append(path);
+                } else if (file.isFile() && !file.isReadable()) {
+                    skipped.append(path);
+                } else if (file.isFile()) {
+                    included.append(path);
                 }
-            } else if (file.isSymLink()) {
-                skipped.append(path);
-            } else if (file.isDir() && !file.isReadable()) {
-                skipped.append(path);
-            } else if (file.isFile() && !file.isReadable()) {
-                skipped.append(path);
-            } else if (file.isFile()) {
-                included.append(path);
             }
         }
     }
@@ -279,7 +306,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         return false;
     }
 
-    const BackupPreview selection = preview(sourceDirectories, exclusions);
+    const BackupPreview selection = scan(sourceDirectories, exclusions, false);
     for (const QString &path : selection.missingPaths) {
         outcome.issues.append({path, QStringLiteral("selection"), QStringLiteral("The source path does not exist.")});
     }
@@ -325,6 +352,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         }
         return false;
     }
+    QSet<QString> ensuredDirectories {normalizedRemoteRoot};
     for (const QString &sourceDirectory : sourceDirectories) {
         sourcePrefixes.append(remoteSegment(QFileInfo(sourceDirectory).fileName()));
     }
@@ -428,18 +456,26 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
             && !remoteFile.checksum.isEmpty() && remoteFile.checksum == sourceChecksum;
 
         if (!alreadyVerified) {
-            if (!provider.ensureDirectory(QFileInfo(remotePath).path(), &providerError)) {
+            const QString parent = QFileInfo(remotePath).path();
+            if (!ensuredDirectories.contains(parent) && !provider.ensureDirectory(parent, &providerError)) {
                 failFile(QStringLiteral("preparing"), providerError.isEmpty()
                     ? QStringLiteral("The remote folder could not be created.")
                     : providerError);
                 continue;
             }
+            ensuredDirectories.insert(parent);
             reportPhase(QStringLiteral("uploading"));
             if (!provider.upload(snapshot.fileName(), remotePath, &providerError)) {
-                failFile(QStringLiteral("uploading"), providerError.isEmpty()
-                    ? QStringLiteral("The file could not be uploaded.")
-                    : providerError);
-                continue;
+                // An ensured directory may have been removed remotely. Recheck
+                // it and retry the same immutable snapshot once, then verify.
+                ensuredDirectories.remove(parent);
+                if (!provider.ensureDirectory(parent, &providerError)
+                    || !provider.upload(snapshot.fileName(), remotePath, &providerError)) {
+                    failFile(QStringLiteral("uploading"), providerError.isEmpty()
+                        ? QStringLiteral("The file could not be uploaded.") : providerError);
+                    continue;
+                }
+                ensuredDirectories.insert(parent);
             }
             reportPhase(QStringLiteral("verifying"));
             if (!provider.inspect(remotePath, &remoteFile, &providerError)

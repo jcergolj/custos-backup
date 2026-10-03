@@ -145,6 +145,13 @@ esac
     worker.start(QStringLiteral(OMACUSTOS_WORKER_BINARY), {"--config", configPath});
     QVERIFY(worker.waitForStarted());
     QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(home.filePath("blocked")), 10000);
+    // A blocked synchronous transfer still publishes its latest phase without
+    // needing another engine callback, while ordinary phase changes coalesce.
+    const QString expectedPhase = phase == "upload" ? "uploading" : "finalizing";
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        return store.load() && store.find("documents")
+            && store.find("documents")->progress.phase == expectedPhase;
+    })(), 3000);
     QVERIFY(store.load());
     QCOMPARE(store.find("documents")->status, QString("running"));
     QCOMPARE(store.find("documents")->attempts, 1);

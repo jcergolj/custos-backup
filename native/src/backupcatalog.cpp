@@ -106,8 +106,9 @@ bool BackupCatalog::listCopies(BackupProvider &provider, const QString &backupFo
 }
 
 bool BackupCatalog::verifyCopy(BackupProvider &provider, const QString &copyFolder, const QString &expectedSetId,
-    RemoteCopy *copy, QString *error)
+    RemoteCopy *copy, QString *error, const std::function<bool()> &cancelled)
 {
+    if (cancelled && cancelled()) return false;
     if (copy == nullptr || copyFolder.trimmed().isEmpty()) {
         warning(error, QStringLiteral("A remote copy folder and destination are required."));
         return false;
@@ -122,8 +123,12 @@ bool BackupCatalog::verifyCopy(BackupProvider &provider, const QString &copyFold
     const QString localManifest = temporary.filePath(QStringLiteral("manifest.json"));
     QVector<BackupEntry> entries;
     BackupManifestInfo info;
-    if (!provider.download(remoteManifest, localManifest, error)
-        || !BackupManifest::load(localManifest, &entries, &info, error)) {
+    if (!provider.download(remoteManifest, localManifest, error)) {
+        warning(error, QStringLiteral("The remote manifest %1 is unavailable.").arg(remoteManifest));
+        return false;
+    }
+    if (cancelled && cancelled()) return false;
+    if (!BackupManifest::load(localManifest, &entries, &info, error)) {
         warning(error, QStringLiteral("The remote manifest %1 is unavailable.").arg(remoteManifest));
         return false;
     }
@@ -135,6 +140,8 @@ bool BackupCatalog::verifyCopy(BackupProvider &provider, const QString &copyFold
     *copy = {root, remoteManifest, info.computerName, info.setId, info.setName, info.copyId,
         info.status, info.createdAt, {}, {}, info.failedItems};
     for (const BackupEntry &entry : entries) {
+        // Provider calls remain serial; superseded browsing stops between calls.
+        if (cancelled && cancelled()) return false;
         if (!inside(entry.remotePath, root)) {
             warning(error, QStringLiteral("The remote manifest %1 points outside its copy.").arg(remoteManifest));
             copy->unavailableItems.append(entry.restorePath);
@@ -150,6 +157,26 @@ bool BackupCatalog::verifyCopy(BackupProvider &provider, const QString &copyFold
         }
         copy->entries.append(entry);
     }
+    return true;
+}
+
+bool BackupCatalog::discoverCopies(BackupProvider &provider, const QString &backupFolder, const QString &expectedSetId,
+    QVector<RemoteCopy> *copies, QString *error)
+{
+    QVector<RemoteCopy> listed;
+    if (copies == nullptr || !listCopies(provider, backupFolder, &listed, error)) return false;
+    copies->clear();
+    for (const RemoteCopy &candidate : listed) {
+        RemoteCopy copy;
+        QString copyError;
+        if (verifyCopy(provider, candidate.rootPath, expectedSetId, &copy, &copyError)) {
+            copies->append(copy);
+        }
+        warning(error, copyError);
+    }
+    std::sort(copies->begin(), copies->end(), [](const RemoteCopy &left, const RemoteCopy &right) {
+        return left.createdAt > right.createdAt;
+    });
     return true;
 }
 

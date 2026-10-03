@@ -233,7 +233,7 @@ RowLayout {
                 required property int index
                 required property string modelData
                 readonly property string timestamp: dashboard.controller.recentBackupTimestamps[index] || ""
-                readonly property var details: dashboard.controller.runDetails[dashboard.controller.recentBackupSetIds[index]] || ({})
+                readonly property var details: dashboard.controller.runSummaries[dashboard.controller.recentBackupSetIds[index]] || ({})
                 width: recentBackupsList.width
                 implicitHeight: Math.max(80, recentText.implicitHeight + 40)
                 padding: 20
@@ -300,7 +300,7 @@ RowLayout {
                         objectName: "restore-" + recentRow.index
                         text: qsTr("Restore")
                         Layout.preferredHeight: 36
-                        enabled: recentRow.timestamp.length > 0 && !dashboard.restoreState.busy
+                            enabled: recentRow.timestamp.length > 0
                             && dashboard.controller.setIds.indexOf(dashboard.controller.recentBackupSetIds[recentRow.index]) >= 0
                         onClicked: dashboard.restoreRequested(recentRow.index)
                     }
