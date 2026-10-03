@@ -29,6 +29,10 @@ public:
     virtual void endBackupOperation() {}
 
     virtual bool upload(const QString &localPath, const QString &remotePath, QString *error = nullptr) = 0;
+    // Optional recursive upload of a prepared tree into a fresh copy namespace.
+    // The local directory basename must match the remote directory basename.
+    virtual bool supportsDirectoryUpload() const { return false; }
+    virtual bool uploadDirectory(const QString &, const QString &, QString * = nullptr) { return false; }
     virtual bool ensureDirectory(const QString &remotePath, QString *error = nullptr) = 0;
     virtual bool download(const QString &remotePath, const QString &localPath, QString *error = nullptr) = 0;
     virtual bool inspect(const QString &remotePath, RemoteFile *file, QString *error = nullptr) = 0;

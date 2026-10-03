@@ -200,6 +200,18 @@ void BackupSetControllerTest::remainingTimeIsReportedForTheRunningSetOnly()
     QVERIFY(transfer.value("text").toString().contains("1 of 4 files processed · 1 verified · 1 items failed"));
     QVERIFY(transfer.value("text").toString().contains("Uploading: /safe/large file"));
     QVERIFY(!controller.transferProgress().contains("photos"));
+    for (const QString &phase : {QString("staging"), QString("uploading-folder")}) {
+        record.progress.phase = phase;
+        record.progress.processedFiles = 0;
+        record.progress.processedBytes = 0;
+        QVERIFY(runs.save());
+        controller.refreshRunState();
+        const auto folderProgress = controller.transferProgress().value("documents").toMap();
+        QVERIFY(folderProgress.value("indeterminate").toBool());
+        QVERIFY(folderProgress.value("text").toString().contains(phase == "staging"
+            ? "Preparing backup folder:" : "Uploading folder:"));
+        QVERIFY(controller.remainingTimes().value("documents").toString() != "Finalizing backup…");
+    }
     record.progress.finalizing = true;
     QVERIFY(runs.save());
     controller.refreshRunState();

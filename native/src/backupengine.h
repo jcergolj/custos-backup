@@ -37,6 +37,8 @@ struct BackupCopyMetadata {
 struct BackupOptions {
     // New copy namespaces skip reuse checks and verify payloads together after
     // uploads finish, using folder metadata with individual inspection fallback.
+    // Providers supporting recursive upload receive a staged tree in one call
+    // when a folder source is selected; its staging is removed before verification.
     bool freshCopy = false;
 };
 

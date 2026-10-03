@@ -17,6 +17,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <optional>
 
 namespace {
 
@@ -360,6 +361,22 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         return false;
     }
     QSet<QString> ensuredDirectories {normalizedRemoteRoot};
+    const bool uploadFolder = options.freshCopy && provider.supportsDirectoryUpload()
+        && std::any_of(sourceDirectories.cbegin(), sourceDirectories.cend(), [](const QString &path) {
+            return QFileInfo(path).isDir();
+        });
+    std::optional<QTemporaryDir> folderStaging;
+    QString stagedFolder;
+    if (uploadFolder) {
+        folderStaging.emplace(QDir::temp().filePath(QStringLiteral("omacustos-backup-XXXXXX")));
+        stagedFolder = folderStaging->filePath(QFileInfo(normalizedRemoteRoot).fileName());
+        if (!folderStaging->isValid() || !QDir().mkpath(stagedFolder)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The backup staging folder could not be created.");
+            }
+            return false;
+        }
+    }
     for (const QString &sourceDirectory : sourceDirectories) {
         sourcePrefixes.append(remoteSegment(QFileInfo(sourceDirectory).fileName()));
     }
@@ -372,9 +389,13 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
 
     for (const QString &sourcePath : selection.includedFiles) {
+        bool stagedForFolder = false;
         // Count attempted files, including failures, without presenting those
         // failures as verified uploads. This measures remaining work only.
         const auto finishedFile = qScopeGuard([&] {
+            // A staged file has not been uploaded yet. Count it only once the
+            // folder transfer finishes, so preparation never reports 100% upload.
+            if (stagedForFolder) return;
             ++progress.processedFiles;
             progress.processedBytes += plannedSizes.value(sourcePath);
             progress.currentFile.clear();
@@ -421,7 +442,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
                 reportProgress(progress);
             }
         };
-        reportPhase(QStringLiteral("reading"));
+        reportPhase(uploadFolder ? QStringLiteral("staging") : QStringLiteral("reading"));
 
         QFile sourceFile(sourcePath);
         if (!sourceFile.open(QIODevice::ReadOnly)) {
@@ -430,12 +451,31 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         }
         // Hash the bytes copied into a private snapshot and upload that same
         // read-only file, never a source pathname that can change afterward.
-        QTemporaryDir staging(QDir::temp().filePath(QStringLiteral("omacustos-payload-XXXXXX")));
-        if (!staging.isValid()) {
+        std::optional<QTemporaryDir> fileStaging;
+        QString snapshotPath;
+        if (uploadFolder) {
+            snapshotPath = QDir(stagedFolder).filePath(remoteMappedPath);
+            if (!QDir().mkpath(QFileInfo(snapshotPath).path())) {
+                failFile(QStringLiteral("reading"), QStringLiteral("The backup payload folder could not be staged."));
+                continue;
+            }
+        } else {
+            fileStaging.emplace(QDir::temp().filePath(QStringLiteral("omacustos-payload-XXXXXX")));
+            snapshotPath = fileStaging->filePath(QFileInfo(remotePath).fileName());
+        }
+        if (fileStaging && !fileStaging->isValid()) {
             failFile(QStringLiteral("reading"), QStringLiteral("The backup staging folder could not be created."));
             continue;
         }
-        QFile snapshot(staging.filePath(QFileInfo(remotePath).fileName()));
+        QFile snapshot(snapshotPath);
+        bool snapshotReady = false;
+        const auto discardPartialSnapshot = qScopeGuard([&] {
+            // A failed copy must not be picked up by the recursive folder upload.
+            if (uploadFolder && !snapshotReady) {
+                snapshot.close();
+                QFile::remove(snapshotPath);
+            }
+        });
         if (!snapshot.open(QIODevice::WriteOnly)) {
             failFile(QStringLiteral("reading"), QStringLiteral("The backup payload could not be staged: %1").arg(snapshot.errorString()));
             continue;
@@ -452,6 +492,12 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
         sourceFile.close();
         if (!snapshot.setPermissions(QFileDevice::ReadOwner)) {
             failFile(QStringLiteral("reading"), QStringLiteral("The staged backup payload could not be made read-only."));
+            continue;
+        }
+        if (uploadFolder) {
+            pendingVerification.append({sourcePath, remotePath, sourceSize, sourceChecksum, mappedPath});
+            snapshotReady = true;
+            stagedForFolder = true;
             continue;
         }
         RemoteFile remoteFile;
@@ -503,6 +549,40 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
             pendingVerification.append(entry);
         } else {
             recordVerified(entry);
+        }
+    }
+
+    if (uploadFolder) {
+        if (!pendingVerification.isEmpty()) {
+            progress.phase = QStringLiteral("uploading-folder");
+            progress.currentFile = sourceDirectories.size() == 1 ? sourceDirectories.first() : normalizedRemoteRoot;
+            progress.currentFileBytes = 0;
+            for (const BackupEntry &entry : pendingVerification) progress.currentFileBytes += entry.size;
+            if (reportProgress) reportProgress(progress);
+            providerError.clear();
+            if (!provider.uploadDirectory(stagedFolder, normalizedRemoteRoot, &providerError)
+                && (!provider.ensureDirectory(normalizedRemoteRoot, &providerError)
+                    || !provider.uploadDirectory(stagedFolder, normalizedRemoteRoot, &providerError))) {
+                const QString folderUploadError = providerError.isEmpty()
+                    ? QStringLiteral("The backup folder could not be uploaded.") : providerError;
+                // A failed recursive command can have transferred some files.
+                // Keep those files restorable only after individual verification,
+                // and never report the overall operation as successful.
+                outcome.issues.append({progress.currentFile, QStringLiteral("uploading"), folderUploadError});
+                ++progress.failedItems;
+            }
+            progress.processedFiles += pendingVerification.size();
+            for (const BackupEntry &entry : pendingVerification) {
+                progress.processedBytes += plannedSizes.value(entry.sourcePath);
+            }
+        }
+        // No payload bytes are needed for verification. Free all staged data
+        // immediately after the transfer/retry, including failed transfers.
+        if (!folderStaging->remove()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Unable to remove the backup staging folder: %1").arg(folderStaging->path());
+            }
+            return false;
         }
     }
 

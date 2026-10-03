@@ -136,10 +136,14 @@ void ReliabilityTest::workerPersistsDistinctResultsAndFailureDetails_data()
     QTest::addColumn<QString>("failure");
     QTest::addColumn<QString>("status");
     QTest::addColumn<int>("verified");
-    QTest::newRow("successful") << QString("none") << QString("success") << 2;
-    QTest::newRow("partial upload") << QString("partial") << QString("incomplete") << 1;
-    QTest::newRow("all uploads failed") << QString("all") << QString("failed") << 0;
-    QTest::newRow("manifest upload failed") << QString("manifest") << QString("failed") << 2;
+    QTest::addColumn<bool>("folderSource");
+    for (bool folderSource : {false, true}) {
+        const QString prefix = folderSource ? "folder: " : "files: ";
+        QTest::newRow(qPrintable(prefix + "successful")) << QString("none") << QString("success") << 2 << folderSource;
+        QTest::newRow(qPrintable(prefix + "partial upload")) << QString("partial") << QString("incomplete") << 1 << folderSource;
+        QTest::newRow(qPrintable(prefix + "all uploads failed")) << QString("all") << QString("failed") << 0 << folderSource;
+        QTest::newRow(qPrintable(prefix + "manifest upload failed")) << QString("manifest") << QString("failed") << 2 << folderSource;
+    }
 }
 
 void ReliabilityTest::workerPersistsDistinctResultsAndFailureDetails()
@@ -147,6 +151,7 @@ void ReliabilityTest::workerPersistsDistinctResultsAndFailureDetails()
     QFETCH(QString, failure);
     QFETCH(QString, status);
     QFETCH(int, verified);
+    QFETCH(bool, folderSource);
     QTemporaryDir home;
     QVERIFY(home.isValid());
     QFile cli(home.filePath("fake-proton"));
@@ -166,7 +171,17 @@ case "$2" in
       exit 1
     fi
     mkdir -p "$FAKE_REMOTE$parent"
-    cp "$source" "$FAKE_REMOTE$parent/$name"
+    if [[ -d "$source" ]]; then
+      mkdir -p "$FAKE_REMOTE$parent/$name"
+      if [[ "$FAILURE" == partial ]]; then
+        cp -f "$source/good.txt" "$FAKE_REMOTE$parent/$name/good.txt"
+        printf 'Connection interrupted' >&2
+        exit 1
+      fi
+      cp -fR "$source/." "$FAKE_REMOTE$parent/$name/"
+    else
+      cp "$source" "$FAKE_REMOTE$parent/$name"
+    fi
     ;;
   info)
     path="$FAKE_REMOTE${@: -1}"
@@ -183,12 +198,15 @@ esac
     cli.close();
     QVERIFY(cli.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
     QStringList sources;
+    const QString sourceFolder = home.filePath("source");
+    QVERIFY(QDir().mkpath(sourceFolder));
     for (const QString &name : {QString("good.txt"), QString("bad.txt")}) {
-        QFile file(home.filePath(name));
+        QFile file(folderSource ? QDir(sourceFolder).filePath(name) : home.filePath(name));
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write("content");
         sources.append(file.fileName());
     }
+    if (folderSource) sources = {sourceFolder};
     BackupConfig config;
     config.protonBinary = cli.fileName();
     config.sets = {{"documents", "Documents", "/my-files/backups", sources, {}}};
@@ -202,6 +220,7 @@ esac
     auto environment = QProcessEnvironment::systemEnvironment();
     environment.insert("FAKE_REMOTE", home.filePath("remote"));
     environment.insert("FAILURE", failure);
+    environment.insert("TMPDIR", home.path());
     worker.setProcessEnvironment(environment);
     worker.start(QStringLiteral(OMACUSTOS_WORKER_BINARY), {"--config", configPath});
     QVERIFY(worker.waitForFinished(10000));
@@ -227,11 +246,12 @@ esac
         QCOMPARE(store.readyIndexes(record.nextAttempt).size(), 1);
     }
     if (failure == "partial" || failure == "all") {
-        QCOMPARE(record.result.issues.size(), failure == "all" ? 2 : 1);
-        QCOMPARE(record.result.issues.first().path, home.filePath("bad.txt"));
+        QCOMPARE(record.result.issues.size(), (failure == "all" ? 2 : 1) + (folderSource ? 1 : 0));
+        QCOMPARE(record.result.issues.first().path, folderSource ? sourceFolder : home.filePath("bad.txt"));
         QCOMPARE(record.result.issues.first().phase, QString("uploading"));
         QCOMPARE(record.result.issues.first().reason, QString("Connection interrupted"));
     }
+    QVERIFY(QDir(home.path()).entryList({"omacustos-backup-*"}, QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
 }
 
 void ReliabilityTest::olderRunRecordsHaveNoMadeUpEstimate()

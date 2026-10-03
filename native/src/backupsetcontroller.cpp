@@ -54,8 +54,10 @@ QString statusLabel(const QString &status)
 QString phaseLabel(const QString &phase)
 {
     if (phase == QStringLiteral("reading")) return QObject::tr("Reading");
+    if (phase == QStringLiteral("staging")) return QObject::tr("Preparing backup folder");
     if (phase == QStringLiteral("checking")) return QObject::tr("Checking remote file");
     if (phase == QStringLiteral("uploading")) return QObject::tr("Uploading");
+    if (phase == QStringLiteral("uploading-folder")) return QObject::tr("Uploading folder");
     if (phase == QStringLiteral("verifying")) return QObject::tr("Verifying");
     if (phase == QStringLiteral("selection")) return QObject::tr("Selecting sources");
     if (phase == QStringLiteral("finalizing")) return QObject::tr("Finalizing backup");
@@ -443,7 +445,8 @@ QVariantMap BackupSetController::calculateTransferProgress() const
             {QStringLiteral("text"), text},
             {QStringLiteral("fraction"), progress.totalFiles > 0
                 ? qBound(0.0, double(progress.processedFiles) / progress.totalFiles, 1.0) : 0.0},
-            {QStringLiteral("indeterminate"), progress.totalFiles <= 0 || progress.finalizing},
+            {QStringLiteral("indeterminate"), progress.totalFiles <= 0 || progress.finalizing
+                || progress.phase == QStringLiteral("staging") || progress.phase == QStringLiteral("uploading-folder")},
         });
     }
     return result;

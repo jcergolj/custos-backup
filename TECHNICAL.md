@@ -105,7 +105,7 @@ button's tooltip.
 
 The Proton Drive provider uses the official CLI for:
 
-- uploads with a parent folder and replace conflict handling;
+- uploads with a parent folder, file replacement, and folder merge for recursive transfers;
 - downloads with remove conflict handling;
 - discovery through `filesystem list`;
 - cleanup through per-item `trash` followed by `delete`.
@@ -115,9 +115,18 @@ download using `size` or `activeRevision.claimedSize`, not encrypted storage siz
 Each payload is copied into a private temporary folder and hashed while copying.
 The resulting read-only staged file is uploaded under the requested remote
 basename, so source edits or pathname replacement cannot invalidate the recorded
-SHA-256. Staging holds one payload at a time and is removed after the file attempt;
-the temporary filesystem needs space for the largest payload. Read or
-staging failures produce failed items, never successful entries.
+SHA-256. Fresh Proton backups containing a folder source stage the whole selected
+tree, preserving mapped paths, hidden files, and exclusions, and upload it with
+one recursive CLI command. Folder conflicts use `merge`, allowing one whole-tree
+retry without replacing already transferred folders. The private staging tree is
+removed immediately after the upload/retry, before remote verification, on both
+success and failure. Early returns also remove staging automatically. The temporary
+filesystem needs space for the entire selected backup. File-only backups and
+providers without recursive upload retain per-file staging and transfer.
+Read or staging failures produce failed items, never successful entries; partial
+staged files are removed before the recursive upload can see them. An unsuccessful
+folder command cannot mark the backup successful, but any files that pass subsequent
+verification remain individually restorable in an incomplete copy.
 
 A provider SHA-256 field is used when the CLI exposes one. Existing remote payloads
 are reused only when both size and checksum match the staged bytes. With size-only
@@ -129,7 +138,7 @@ inspection for missing, malformed, or ambiguous entries. Unsupported/failed or
 storage-only listings disable further bulk attempts for that pass. Only verified
 payloads enter the manifest or verified progress counts; manifest verification still
 applies. The verification pass retains metadata only, so staged payloads are removed
-after upload/retry and staging space remains bounded to one payload. Engine callers
+after upload/retry rather than being retained through verification. Engine callers
 reusing a namespace retain checksum-based reuse checks and immediate individual
 post-upload verification by default.
 Within a backup operation, each payload parent directory is ensured once, and the
@@ -226,6 +235,10 @@ cleanup show **Finalizing backup…** until the worker records its final result.
 The work-progress bar measures processed file attempts rather than upload bytes
 or verified contents. The CLI has no documented live byte-progress feed; the
 current path, planned size, and phase remain visible during single-file transfers.
+Folder backups show separate preparation and whole-folder upload phases with an
+indeterminate work-progress bar. Staging a file does not count as uploading it;
+processed counts advance only after the folder command finishes, and verification
+counts remain zero until remote verification succeeds.
 
 Run state also stores a structured `result` with verified payload counts, issues,
 and whether the remote manifest passed verification. Only a verified manifest with

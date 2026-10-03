@@ -104,6 +104,30 @@ bool ProtonProvider::upload(const QString &localPath, const QString &remotePath,
     return uploaded;
 }
 
+bool ProtonProvider::uploadDirectory(const QString &localPath, const QString &remotePath, QString *error)
+{
+    const QFileInfo source(localPath);
+    const QString remoteName = QFileInfo(remotePath).fileName();
+    if (!remotePath.startsWith('/') || remotePath != QDir::cleanPath(remotePath)
+        || remoteName.isEmpty() || remotePath.split('/').contains(QStringLiteral(".."))
+        || !source.isDir() || source.isSymLink() || source.fileName() != remoteName) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The provider folder upload path is invalid.");
+        }
+        return false;
+    }
+
+    // Preserve the prepared tree's paths. Merge allows a whole-folder retry to
+    // reuse successfully transferred children without trashing the copy folder.
+    const bool uploaded = run({
+        QStringLiteral("filesystem"), QStringLiteral("upload"), QStringLiteral("-j"),
+        QStringLiteral("-f"), QStringLiteral("replace"), QStringLiteral("-d"), QStringLiteral("merge"),
+        QStringLiteral("-t"), source.absoluteFilePath(), QFileInfo(remotePath).path(),
+    }, error);
+    if (!uploaded) ensuredDirectories.clear();
+    return uploaded;
+}
+
 bool ProtonProvider::ensureDirectory(const QString &remotePath, QString *error)
 {
     if (remotePath.isEmpty() || !remotePath.startsWith('/')) {

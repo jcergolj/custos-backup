@@ -78,8 +78,6 @@ public:
                 if (upload) uploadedPaths.append(path);
                 else downloadedFolders.append(parent);
                 Failure injected = upload ? Failure::None : downloadFailure;
-                if (upload && name == failUploadName) injected = Failure::TransferError;
-                if (upload && name == truncateUploadName) injected = Failure::TruncatedOutput;
                 if (injected == Failure::TransferError) return failure("Connection interrupted");
                 const auto output = transfer(source, QDir(parent).filePath(name), upload,
                     fileStrategy, folderStrategy, injected);
@@ -151,6 +149,10 @@ private:
     {
         const QFileInfo input(source);
         if (!input.exists() || input.isSymLink()) return failure("Source not found or unsupported");
+        // Apply named upload failures to descendants too, so a recursive upload
+        // can genuinely stop after transferring only part of its prepared tree.
+        if (upload && input.fileName() == failUploadName) return failure("Connection interrupted");
+        if (upload && input.fileName() == truncateUploadName) injected = Failure::TruncatedOutput;
         if (QFileInfo::exists(destination)) {
             if (upload && input.isFile() && QFileInfo(destination).isFile()) {
                 QFile original(source), existing(destination);

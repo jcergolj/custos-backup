@@ -47,8 +47,10 @@ is actually present and valid. The installed CLI's `filesystem list --help` and
 
 ## Failure injection and scope
 
-- `failUploadName`: fail before an upload writes output.
-- `truncateUploadName`: report upload success but write truncated content.
+- `failUploadName`: fail before a matching file or folder writes output, including
+  descendants of a recursive folder upload.
+- `truncateUploadName`: report upload success but write truncated matching content,
+  including descendants of a recursive folder upload.
 - `downloadFailure`: fail before transfer, fail after partial output, report
   success with truncated output, or report success with same-size corrupt output.
 - `uploadedPaths`, `downloadedFolders`, and `trashedPaths`: inspect staging,
@@ -69,7 +71,10 @@ separate from this suite.
 
 The provider suite checks requested-name mismatches, application `manifest.json`
 collisions, payload transfer failures, verified manifest entries, and restored
-contents. The fixture suite checks its own file/folder strategy matrix and
+contents. Fresh folder-backup tests also cover one recursive payload command,
+mapped paths across multiple sources, hidden files, exclusions, immutable snapshots,
+whole-folder retries, partial results, and staging removal before verification on
+both success and failure. The fixture suite checks its own file/folder strategy matrix and
 metadata variants, then uses the real `ProtonProvider` and `BackupEngine` for
 failed size/checksum verification, partial downloads, successful replacement,
 unrelated remote-basename files/folders, final-placement failure, preservation
