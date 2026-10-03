@@ -412,12 +412,34 @@ TestCase {
         list.positionViewAtIndex(5000, ListView.Center)
         waitForRendering(app.contentItem)
         verify(control("restoreFile-5000").checked)
+        const selectedIndexes = app.selectedRestoreIndexes
+        const selectedPaths = app.selectedRestorePaths
+        const lookup = control("restorePanel").selectionLookup
         // Exercise the actual checkbox handler, including a large offscreen
         // selection, without depending on instantiated delegates for its state.
         control("restoreFile-5000").toggle()
         control("restoreFile-5000").toggled()
         compare(app.selectedRestoreIndexes.length, 9999)
         verify(app.selectedRestoreIndexes.indexOf(5000) < 0)
+        verify(app.selectedRestoreIndexes === selectedIndexes)
+        verify(app.selectedRestorePaths === selectedPaths)
+        verify(control("restorePanel").selectionLookup === lookup)
+        compare(control("restoreSelectionCount").text, "Selected files: 9999")
+        // Deselecting swaps in the last selection. Toggling that moved item
+        // must use its updated position and keep path/index arrays aligned.
+        list.positionViewAtIndex(9999, ListView.Center)
+        waitForRendering(app.contentItem)
+        control("restoreFile-9999").toggle()
+        control("restoreFile-9999").toggled()
+        compare(app.selectedRestoreIndexes.length, 9998)
+        verify(app.selectedRestoreIndexes.indexOf(9999) < 0)
+        verify(app.selectedRestorePaths.indexOf(paths[9999]) < 0)
+        control("restoreFile-9999").toggle()
+        control("restoreFile-9999").toggled()
+        compare(app.selectedRestoreIndexes.length, 9999)
+        compare(app.selectedRestorePaths[app.selectedRestoreIndexes.indexOf(9999)], paths[9999])
+        list.positionViewAtIndex(5000, ListView.Center)
+        waitForRendering(app.contentItem)
         const scrollY = list.contentY
         mouseClick(control("closeRestoreButton"))
         mouseClick(control("restore-1"))

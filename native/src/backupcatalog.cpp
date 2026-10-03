@@ -1,9 +1,11 @@
 #include "backupcatalog.h"
 
 #include "backupmanifest.h"
+#include "remotemetadatacache.h"
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QSet>
 #include <QTemporaryDir>
 
@@ -139,6 +141,7 @@ bool BackupCatalog::verifyCopy(BackupProvider &provider, const QString &copyFold
     }
     *copy = {root, remoteManifest, info.computerName, info.setId, info.setName, info.copyId,
         info.status, info.createdAt, {}, {}, info.failedItems};
+    RemoteMetadataCache directoryMetadata(provider);
     for (const BackupEntry &entry : entries) {
         // Provider calls remain serial; superseded browsing stops between calls.
         if (cancelled && cancelled()) return false;
@@ -149,7 +152,10 @@ bool BackupCatalog::verifyCopy(BackupProvider &provider, const QString &copyFold
         }
         RemoteFile remoteFile;
         QString providerError;
-        if (!provider.inspect(entry.remotePath, &remoteFile, &providerError)
+        const QString parent = QFileInfo(entry.remotePath).path();
+        if (directoryMetadata.loadDirectory(parent, &providerError) && cancelled && cancelled()) return false;
+        const bool listed = directoryMetadata.lookup(entry.remotePath, &remoteFile);
+        if ((!listed && !provider.inspect(entry.remotePath, &remoteFile, &providerError))
             || remoteFile.size != entry.size
             || (!remoteFile.checksum.isEmpty() && remoteFile.checksum != entry.checksum)) {
             copy->unavailableItems.append(entry.restorePath);

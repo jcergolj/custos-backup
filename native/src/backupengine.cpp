@@ -1,4 +1,5 @@
 #include "backupengine.h"
+#include "remotemetadatacache.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -90,21 +91,7 @@ bool hasParentPathSegment(const QString &path)
     });
 }
 
-bool sha256(QFile &file, QByteArray *checksum)
-{
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    while (!file.atEnd()) {
-        const QByteArray chunk = file.read(1024 * 1024);
-        if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
-            return false;
-        }
-        hash.addData(chunk);
-    }
-    *checksum = hash.result();
-    return true;
-}
-
-bool copyAndHash(QFile &source, QFile &snapshot, QByteArray *checksum)
+bool copyAndHash(QFile &source, QFileDevice &snapshot, QByteArray *checksum)
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     while (!source.atEnd()) {
@@ -182,12 +169,12 @@ QVariantMap BackupEngine::previewSelection(const QStringList &sourceDirectories,
     };
 }
 
-BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const QStringList &exclusions) const
+BackupPreview BackupEngine::preview(const QStringList &sourceDirectories, const QStringList &exclusions, const std::function<bool()> &cancelled) const
 {
-    return scan(sourceDirectories, exclusions, true);
+    return scan(sourceDirectories, exclusions, true, cancelled);
 }
 
-BackupPreview BackupEngine::scan(const QStringList &sourceDirectories, const QStringList &exclusions, bool reportExcluded) const
+BackupPreview BackupEngine::scan(const QStringList &sourceDirectories, const QStringList &exclusions, bool reportExcluded, const std::function<bool()> &cancelled) const
 {
     const ExclusionRules rules(exclusions);
     BackupPreview result;
@@ -197,6 +184,7 @@ BackupPreview BackupEngine::scan(const QStringList &sourceDirectories, const QSt
     QStringList missing;
 
     for (const QString &sourceDirectory : sourceDirectories) {
+        if (cancelled && cancelled()) return {};
         const QFileInfo source(sourceDirectory);
         if (!source.exists()) {
             missing.append(source.absoluteFilePath());
@@ -221,8 +209,10 @@ BackupPreview BackupEngine::scan(const QStringList &sourceDirectories, const QSt
 
         QStringList pending {source.absoluteFilePath()};
         while (!pending.isEmpty()) {
+            if (cancelled && cancelled()) return {};
             QDirIterator iterator(pending.takeLast(), QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
             while (iterator.hasNext()) {
+                if (cancelled && cancelled()) return {};
                 iterator.next();
                 const QFileInfo file = iterator.fileInfo();
                 const QString path = file.absoluteFilePath();
@@ -247,6 +237,7 @@ BackupPreview BackupEngine::scan(const QStringList &sourceDirectories, const QSt
         }
     }
 
+    if (cancelled && cancelled()) return {};
     included.removeDuplicates();
     excluded.removeDuplicates();
     skipped.removeDuplicates();
@@ -281,7 +272,7 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     return backup(sourceDirectories, remoteRoot, exclusions, {}, provider, manifestPath, error);
 }
 
-bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error, const std::function<void(const BackupProgress &)> &reportProgress, BackupResult *result) const
+bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &remoteRoot, const QStringList &exclusions, const BackupCopyMetadata &metadata, BackupProvider &provider, QString *manifestPath, QString *error, const std::function<void(const BackupProgress &)> &reportProgress, BackupResult *result, const BackupOptions &options) const
 {
     BackupResult outcome;
     outcome.reported = true;
@@ -340,12 +331,28 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
     }
 
     QJsonArray entries;
+    QVector<BackupEntry> pendingVerification;
+    const auto recordVerified = [&](const BackupEntry &entry) {
+        entries.append(QJsonObject {
+            {QStringLiteral("source"), entry.sourcePath},
+            {QStringLiteral("remote"), entry.remotePath},
+            {QStringLiteral("restore"), entry.restorePath},
+            {QStringLiteral("size"), entry.size},
+            {QStringLiteral("sha256"), QString::fromLatin1(entry.checksum.toHex())},
+        });
+        ++outcome.verifiedFiles;
+        outcome.verifiedBytes += entry.size;
+        progress.verifiedFiles = outcome.verifiedFiles;
+        progress.verifiedBytes = outcome.verifiedBytes;
+    };
     QStringList expectedItems;
     QStringList failedItems;
     QStringList sourcePrefixes;
     QSet<QString> remotePaths;
     remotePaths.insert(QStringLiteral("manifest.json"));
     QString providerError;
+    provider.beginBackupOperation();
+    const auto endOperation = qScopeGuard([&] { provider.endBackupOperation(); });
     if (!provider.ensureDirectory(normalizedRemoteRoot, &providerError)) {
         if (error != nullptr) {
             *error = providerError.isEmpty() ? QStringLiteral("Unable to create the remote backup folder.") : providerError;
@@ -448,10 +455,10 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
             continue;
         }
         RemoteFile remoteFile;
-        reportPhase(QStringLiteral("checking"));
+        if (!options.freshCopy) reportPhase(QStringLiteral("checking"));
         // Size-only metadata cannot establish that an existing payload matches
         // this snapshot, so providers without checksums must upload it again.
-        const bool alreadyVerified = provider.inspect(remotePath, &remoteFile, &providerError)
+        const bool alreadyVerified = !options.freshCopy && provider.inspect(remotePath, &remoteFile, &providerError)
             && remoteFile.size == sourceSize
             && !remoteFile.checksum.isEmpty() && remoteFile.checksum == sourceChecksum;
 
@@ -477,10 +484,10 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
                 }
                 ensuredDirectories.insert(parent);
             }
-            reportPhase(QStringLiteral("verifying"));
-            if (!provider.inspect(remotePath, &remoteFile, &providerError)
+            if (!options.freshCopy) reportPhase(QStringLiteral("verifying"));
+            if (!options.freshCopy && (!provider.inspect(remotePath, &remoteFile, &providerError)
                 || remoteFile.size != sourceSize
-                || (!remoteFile.checksum.isEmpty() && remoteFile.checksum != sourceChecksum)) {
+                || (!remoteFile.checksum.isEmpty() && remoteFile.checksum != sourceChecksum))) {
                 failFile(QStringLiteral("verifying"), providerError.isEmpty()
                     ? QStringLiteral("Remote verification failed.")
                     : providerError);
@@ -488,20 +495,41 @@ bool BackupEngine::backup(const QStringList &sourceDirectories, const QString &r
             }
         }
 
-        entries.append(QJsonObject {
-            {QStringLiteral("source"), sourcePath},
-            {QStringLiteral("remote"), remotePath},
-            {QStringLiteral("restore"), mappedPath},
-            {QStringLiteral("size"), sourceSize},
-            {QStringLiteral("sha256"), QString::fromLatin1(sourceChecksum.toHex())},
-        });
-        ++outcome.verifiedFiles;
-        outcome.verifiedBytes += sourceSize;
-        progress.verifiedFiles = outcome.verifiedFiles;
-        progress.verifiedBytes = outcome.verifiedBytes;
+        const BackupEntry entry {sourcePath, remotePath, sourceSize, sourceChecksum, mappedPath};
+        if (options.freshCopy) {
+            // Keep only metadata after a successful upload. The immutable staged
+            // bytes remain available through upload retries, then are removed;
+            // verification does not require another local payload copy.
+            pendingVerification.append(entry);
+        } else {
+            recordVerified(entry);
+        }
     }
 
     progress.finalizing = true;
+    RemoteMetadataCache directoryMetadata(provider);
+    for (const BackupEntry &entry : pendingVerification) {
+        progress.phase = QStringLiteral("verifying");
+        progress.currentFile = entry.sourcePath;
+        progress.currentFileBytes = entry.size;
+        if (reportProgress) reportProgress(progress);
+        RemoteFile remoteFile;
+        QString verificationError;
+        directoryMetadata.loadDirectory(QFileInfo(entry.remotePath).path(), &verificationError);
+        const bool listed = directoryMetadata.lookup(entry.remotePath, &remoteFile);
+        if ((!listed && !provider.inspect(entry.remotePath, &remoteFile, &verificationError))
+            || remoteFile.size != entry.size
+            || (!remoteFile.checksum.isEmpty() && remoteFile.checksum != entry.checksum)) {
+            outcome.issues.append({entry.sourcePath, QStringLiteral("verifying"), verificationError.isEmpty()
+                ? QStringLiteral("Remote verification failed.") : verificationError});
+            failedItems.append(entry.restorePath);
+            ++progress.failedItems;
+        } else {
+            recordVerified(entry);
+        }
+    }
+    progress.currentFile.clear();
+    progress.currentFileBytes = 0;
     progress.phase = QStringLiteral("finalizing");
     if (reportProgress) {
         reportProgress(progress);
@@ -672,32 +700,22 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         return false;
     }
 
-    QByteArray checksum;
-    const bool hashed = sha256(restoredFile, &checksum);
-    if (!hashed || restoredFile.size() != entry.size
-        || (!entry.checksum.isEmpty() && checksum != entry.checksum)) {
-        restoredFile.close();
-        QFile::remove(temporaryDestination);
-        if (error != nullptr) {
-            *error = QStringLiteral("The restored file failed verification.");
-        }
-
-        return false;
-    }
-
     // Recheck after the transfer: QSaveFile follows destination symlinks, and
     // neither a new symlink nor a changed parent may redirect verified content.
-    if (QFileInfo(destinationDirectory).isSymLink() || QFileInfo(destination).isSymLink()
-        || QFileInfo(destinationDirectory).canonicalFilePath() != canonicalRoot
-        || QFileInfo(destinationParent).canonicalFilePath() != canonicalParent) {
+    const auto destinationUnchanged = [&] {
+        return !QFileInfo(destinationDirectory).isSymLink() && !QFileInfo(destination).isSymLink()
+            && QFileInfo(destinationDirectory).canonicalFilePath() == canonicalRoot
+            && QFileInfo(destinationParent).canonicalFilePath() == canonicalParent;
+    };
+    if (!destinationUnchanged()) {
         if (error != nullptr) {
             *error = QStringLiteral("The restore destination is outside the selected folder.");
         }
         return false;
     }
 
-    // Commit verified bytes atomically; never delete the existing destination
-    // before replacement is ready, including when final placement fails.
+    // Hash while writing the atomic replacement, so verification and placement
+    // read the payload only once. Unverified bytes are never committed.
     QSaveFile replacement(destination);
     replacement.setDirectWriteFallback(false);
     const auto placementFailure = [&] {
@@ -708,10 +726,22 @@ bool BackupEngine::restoreFile(const BackupEntry &entry, const QString &destinat
         }
         return false;
     };
-    if (!restoredFile.seek(0) || !replacement.open(QIODevice::WriteOnly)) return placementFailure();
-    while (!restoredFile.atEnd()) {
-        const QByteArray bytes = restoredFile.read(1024 * 1024);
-        if (bytes.isEmpty() || replacement.write(bytes) != bytes.size()) return placementFailure();
+    if (!replacement.open(QIODevice::WriteOnly)) return placementFailure();
+    QByteArray checksum;
+    if (!copyAndHash(restoredFile, replacement, &checksum)) return placementFailure();
+    if (replacement.size() != entry.size
+        || (!entry.checksum.isEmpty() && checksum != entry.checksum)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The restored file failed verification.");
+        }
+        return false;
+    }
+    // Copying a large file can take time; recheck immediately before commit too.
+    if (!destinationUnchanged()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The restore destination is outside the selected folder.");
+        }
+        return false;
     }
     if (!replacement.commit()) return placementFailure();
     restoredFile.close();

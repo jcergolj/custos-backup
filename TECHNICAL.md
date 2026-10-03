@@ -109,17 +109,39 @@ download using `size` or `activeRevision.claimedSize`, not encrypted storage siz
 Each payload is copied into a private temporary folder and hashed while copying.
 The resulting read-only staged file is uploaded under the requested remote
 basename, so source edits or pathname replacement cannot invalidate the recorded
-SHA-256. Staging holds one payload at a time and is removed after verification or
-failure; the temporary filesystem needs space for the largest payload. Read or
+SHA-256. Staging holds one payload at a time and is removed after the file attempt;
+the temporary filesystem needs space for the largest payload. Read or
 staging failures produce failed items, never successful entries.
 
 A provider SHA-256 field is used when the CLI exposes one. Existing remote payloads
 are reused only when both size and checksum match the staged bytes. With size-only
 metadata, retries re-upload the snapshot rather than trusting same-sized content.
-Within a backup operation, each payload parent directory is ensured once. A failed
-upload invalidates that parent's cached result and rechecks it before one retry of
-the same staged bytes; post-upload verification still applies. The cache is never
-shared across backup operations.
+The worker explicitly marks its newly allocated copy namespace as fresh and skips
+the pre-upload payload lookup. Once payload uploads finish, it verifies them with
+one fresh content-metadata listing per payload directory, falling back to individual
+inspection for missing, malformed, or ambiguous entries. Unsupported/failed or
+storage-only listings disable further bulk attempts for that pass. Only verified
+payloads enter the manifest or verified progress counts; manifest verification still
+applies. The verification pass retains metadata only, so staged payloads are removed
+after upload/retry and staging space remains bounded to one payload. Engine callers
+reusing a namespace retain checksum-based reuse checks and immediate individual
+post-upload verification by default.
+Within a backup operation, each payload parent directory is ensured once, and the
+Proton provider also caches its existing/created ancestors. A failed upload
+invalidates the provider's ancestor cache and the engine's parent result, then
+rechecks the full parent chain before one retry of the same staged bytes. Caches
+are cleared at operation entry and exit, including early failures.
+
+Copy verification can use one folder listing per payload directory when it supplies
+valid content sizes (`size` or `activeRevision.claimedSize`) and optional SHA-256.
+Encrypted `totalStorageSize` is never accepted for verification. Missing, malformed,
+or ambiguous listed entries fall back to individual metadata inspection. An
+unsupported, failed, or storage-only listing disables further bulk attempts for
+that verification. Directory metadata is cached only for the current copy check;
+each subsequent selection or retention discovery obtains fresh metadata.
+Backup finalization and catalog checks share the same operation-local metadata cache.
+Manifest validation uses a failed-path set rather than scanning the failed list for
+each verified entry, keeping membership checks linear in the total item count.
 
 `QProcessRunner` uses a five-minute total runtime limit for metadata and other
 commands, and a separate 24-hour limit for `filesystem upload` and
@@ -214,10 +236,14 @@ CLI downloads use a private staging directory so their remote-basename conflict
 handling cannot remove destination files or unrelated files and folders. Restore
 payloads stay in private staging until size and SHA-256 verification passes.
 Verified bytes replace the destination atomically with `QSaveFile`, with direct
-write fallback disabled. Download, verification, or placement failures preserve
+write fallback disabled. Hashing and writing the atomic replacement share one
+payload read, and commit occurs only after size/checksum verification. The Proton
+provider moves completed downloads into unused private staging paths on the same
+filesystem instead of making an additional copy; existing provider destinations
+retain atomic replacement. Download, verification, or placement failures preserve
 existing destination content, and staging is cleaned up on every return path.
 Destination and parent symlink checks are repeated after the transfer before
-committing the replacement.
+writing the replacement and again immediately before committing it.
 
 Opening Restore lists only direct copy folders for the selected backup, using
 the recorded run's copy parent when available and the configured computer/backup
@@ -255,11 +281,17 @@ copy identity, destination validation, and checksums remain authoritative. The
 interface retains destination, valid file ticks, and scroll position per backup.
 File-path display lists are cached, and selection remapping builds one path index
 per refresh rather than repeatedly reconstructing or searching the 10,000-file list.
+Individual checkbox toggles mutate owned selection arrays and update an index-to-
+position lookup. Deselection swaps with the last item rather than shifting the
+remaining selection; selection order is not significant. Property notifications
+and visible checkbox state still update without rebuilding the full selection.
 
 Source preview scans run asynchronously against captured source/exclusion lists.
 Selection/input changes invalidate obsolete results, and repeated requests coalesce
 to the latest pending scan. Loading feedback distinguishes the previous preview
-from the pending result. Local-state refresh failures retain last-good run/cleanup
+from the pending result. Superseded scans and controller shutdown cancel traversal
+between source paths/directory entries; cancelled scans discard partial results.
+Local-state refresh failures retain last-good run/cleanup
 data and expose a persistent refresh error.
 
 See [Responsiveness measurements](native/tests/responsiveness.md) for the benchmark

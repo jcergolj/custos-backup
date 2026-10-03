@@ -243,7 +243,7 @@ int main(int argc, char *argv[])
                 progressWriter.update(runStore, progress);
             };
             succeeded = engine.backup(setIterator->sourceDirectories, copyRoot, setIterator->exclusions,
-                metadata, provider, &manifestPath, &error, reportProgress, &record.result);
+                metadata, provider, &manifestPath, &error, reportProgress, &record.result, {true});
         }
         if (succeeded) {
             record.progressElapsedMs = progressClock.elapsed();

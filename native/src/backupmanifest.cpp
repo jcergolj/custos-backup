@@ -105,6 +105,7 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
     QStringList expectedItems;
     QStringList failedItems;
     QSet<QString> expectedSet;
+    QSet<QString> failedSet;
     if (version == 2) {
         for (const QJsonValue &item : root.value(QStringLiteral("expected")).toArray()) {
             expectedItems.append(item.toString());
@@ -113,7 +114,7 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
             failedItems.append(item.toString());
         }
         expectedSet = QSet<QString>(expectedItems.cbegin(), expectedItems.cend());
-        const QSet<QString> failedSet(failedItems.cbegin(), failedItems.cend());
+        failedSet = QSet<QString>(failedItems.cbegin(), failedItems.cend());
         if (expectedSet.size() != expectedItems.size() || failedSet.size() != failedItems.size()) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup manifest is malformed or unsupported.");
@@ -164,7 +165,7 @@ bool BackupManifest::load(const QString &path, QVector<BackupEntry> *entries, Ba
             || containsParentSegment || !sizeValue.isDouble()
             || sizeValue.toDouble() < 0 || sizeValue.toDouble() != qFloor(sizeValue.toDouble())
             || !validChecksum(checksumText)
-            || (version == 2 && (!expectedSet.contains(restorePath) || failedItems.contains(restorePath)))) {
+            || (version == 2 && (!expectedSet.contains(restorePath) || failedSet.contains(restorePath)))) {
             if (error != nullptr) {
                 *error = QStringLiteral("The backup manifest contains an unsafe path.");
             }

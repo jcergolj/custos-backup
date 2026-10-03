@@ -170,10 +170,32 @@ must not be presented as equivalent to that hardware or workload.
 Deterministic regression checks cover the subsequent optimizations separately
 from the recorded frame-submission measurements:
 
-- `protonprovider-test`: backing up 100 files to `/backups/copy` uses two directory
-  listing CLI calls, 101 uploads (payloads plus manifest), and 201 metadata
-  inspections (both payload checks plus manifest verification). Directory caching
-  eliminates repeated parent checks without eliminating payload verification.
+- `protonprovider-test`: backing up 100 files to `/backups/copy` uses 101 uploads
+  (payloads plus manifest). Existing-namespace mode uses two directory listings
+  and 201 metadata inspections. Fresh-copy mode with content metadata uses three
+  listings (two parent checks plus one post-upload listing) and one manifest
+  inspection. Storage-only metadata uses three listings and 101 inspections;
+  partial metadata uses individual checks only for omitted entries. Across two
+  payload folders, full metadata uses two verification listings and just the
+  manifest inspection; unsupported bulk is attempted only once. Nested sibling
+  directories share cached ancestor checks, with cache expiry after successful
+  or failed operations. Removing an ancestor during upload forces full rechecking
+  and a retry of the immutable snapshot.
+- `protonprovider-test`: fresh-copy verification rejects payloads removed, truncated,
+  or same-size corrupted after the last upload, using both bulk and individual
+  metadata. Listing failures fall back without claiming premature success. Verified
+  progress, incomplete manifests, checksums, and single-payload staging cleanup are
+  checked independently of transfer command counts.
+- `protonprovider-test`: verification of 100 files across two payload folders
+  uses two listings and zero individual inspections when valid listing content
+  metadata is available. Partial metadata needs two individual fallbacks;
+  storage-only/failed listings need one bulk attempt plus 100 individual checks.
+  Invalid/ambiguous/out-of-folder metadata, checksum mismatch, retention gates,
+  and cancellation after a bulk call are covered separately.
+- `protonclifixture-test`: empty and multi-chunk restores cover size-only and
+  SHA-256 verification, truncated/same-size-corrupt transfers, and preservation
+  of existing destination bytes and staging cleanup. Restore hashing and atomic
+  copying now share one read; downloads into unused private staging paths are moved.
 - `backupengine-test`: 100 files in one nested folder ensure only the copy root
   and payload parent. A simulated disappearing directory causes one recheck and
   retry, and every resulting entry retains its verified checksum. A deterministic
@@ -196,6 +218,59 @@ from the recorded frame-submission measurements:
   selected copy's inspection, rather than completing the obsolete 100-file scan.
 - Existing engine exclusions tests continue to cover hidden content, bare-name
   and absolute rules, and individual excluded-file reporting in the preview.
+- `backupengine-test`: cooperative preview cancellation stops traversal and
+  discards partial lists; a later uncancelled scan remains complete.
+- `dashboard-test`: toggling with 10,000 selected files retains selection-array
+  and lookup identity, keeps reactive counts current, and handles the swapped
+  final selection correctly. Offscreen selections, refreshed path order, and
+  return scroll remain covered.
 
-The full 22-target CTest suite passes. These are command-count and behavioral
-checks, not new wall-clock speedup or presentation-latency measurements.
+The full 22-target CTest suite passes. These regression checks establish command
+counts and behavior; they do not measure presentation latency or end-to-end cloud
+backup speed.
+
+## Manifest and CLI measurements, 2026-10-03
+
+Run the opt-in manifest loader benchmark from the repository root:
+
+```sh
+cmake --build build --target manifest-benchmark
+QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES='*.info=true' \
+  TMPDIR="$PWD/build" build/manifest-benchmark
+```
+
+The benchmark loads valid incomplete version-2 manifests through the production
+loader. Each fixture has equal numbers of verified entries and distinct failed
+paths; its construction is outside the measured interval. Results include JSON
+parsing and validation, with one warm-up followed by five samples. The environment
+is the development desktop documented above, using the existing workspace build
+and disk-backed temporary files; these are warm-cache loader timings.
+
+The baseline uses the same build and benchmark with the entry-validation lookup
+changed back from `failedSet.contains(restorePath)` to
+`failedItems.contains(restorePath)`. Restore the set lookup and rebuild to reproduce
+the after result. All other loader work is identical.
+
+| Verified entries / failed paths | Manifest bytes | Before median | After median | Reduction |
+| --- | ---: | ---: | ---: | ---: |
+| 1,000 / 1,000 | 352,537 | 10.6 ms | 10.4 ms | approximately 2% |
+| 10,000 / 10,000 | 3,583,537 | 152.4 ms | 107.2 ms | approximately 30% |
+
+This is about a 1.42x loader speedup for the larger incomplete fixture, not a
+prediction that every manifest or entire backup becomes 1.42x faster.
+
+Read-only measurements against the installed Proton CLI also checked the actual
+listing contract. The `/my-files` root listed five file nodes, four with content
+size metadata; omitted metadata still needs the individual fallback. After an
+initial probe, three root listings had a median of 807 ms, and three inspections
+of one file had a median of 756 ms. Initial probes were slower (approximately
+1.4 seconds for root info and 2.9 seconds for listing), showing startup/network
+variation. These small samples are not a representative payload-directory or
+end-to-end backup benchmark. No cloud uploads or deletions were performed.
+
+The deterministic fresh-copy fixture reduces verification of 100 payloads in one
+folder from 100 individual inspections to one listing when complete content
+metadata is available: 99% fewer payload-verification requests. Uploads and the
+manifest's individual verification remain. In the storage-only case, there is one
+extra attempted listing before the original individual checks; no speedup is
+claimed for that fallback.

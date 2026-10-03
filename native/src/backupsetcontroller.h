@@ -10,6 +10,8 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVector>
+#include <atomic>
+#include <memory>
 
 class BackupSetController final : public QObject
 {
@@ -158,6 +160,7 @@ private:
     QStringList pendingSources;
     QStringList pendingExclusions;
     QFutureWatcher<BackupPreview> previewWatcher;
+    std::shared_ptr<std::atomic_bool> previewCancelled;
     QTimer stateTimer;
     QString refreshError;
     QByteArray runContents;

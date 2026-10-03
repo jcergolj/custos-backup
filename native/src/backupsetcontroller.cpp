@@ -122,6 +122,7 @@ BackupSetController::BackupSetController(BackupEngine &engine, QString configPat
 
 BackupSetController::~BackupSetController()
 {
+    if (previewCancelled) previewCancelled->store(true);
     previewWatcher.waitForFinished();
 }
 
@@ -606,6 +607,7 @@ void BackupSetController::preview()
 
     pendingSources = set->sourceDirectories;
     pendingExclusions = set->exclusions;
+    if (previewCancelled) previewCancelled->store(true);
     ++previewGeneration;
     if (!previewWorking) {
         previewWorking = true;
@@ -621,8 +623,10 @@ void BackupSetController::startPreview()
     const auto sources = pendingSources;
     const auto exclusions = pendingExclusions;
     BackupEngine *worker = &engine;
-    previewWatcher.setFuture(QtConcurrent::run([worker, sources, exclusions] {
-        return worker->preview(sources, exclusions);
+    previewCancelled = std::make_shared<std::atomic_bool>(false);
+    const auto cancelled = previewCancelled;
+    previewWatcher.setFuture(QtConcurrent::run([worker, sources, exclusions, cancelled] {
+        return worker->preview(sources, exclusions, [cancelled] { return cancelled->load(); });
     }));
 }
 
@@ -768,6 +772,7 @@ QVector<int> BackupSetController::recentBackupIndexes() const
 
 void BackupSetController::clearPreview()
 {
+    if (previewCancelled) previewCancelled->store(true);
     ++previewGeneration;
     if (previewWorking) {
         previewWorking = false;

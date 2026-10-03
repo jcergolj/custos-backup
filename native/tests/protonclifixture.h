@@ -28,6 +28,9 @@ public:
     QString truncateUploadName;
     Failure downloadFailure = Failure::None;
     bool includeSha256 = false;
+    bool includeListingContentSize = false;
+    QString omitListingMetadataName;
+    QString failListPath;
 
     QString remoteFile(const QString &path) const
     {
@@ -97,11 +100,21 @@ public:
             return {0, QString::fromUtf8(QJsonDocument(info).toJson()), {}};
         }
         if (command == "list") {
+            if (arguments.last() == failListPath) return failure("Listing interrupted");
             if (!QFileInfo(path).isDir()) return failure("Folder not found");
             QJsonArray items;
             for (const QFileInfo &item : QDir(path).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden)) {
-                items.append(QJsonObject {{"name", QJsonObject {{"ok", true}, {"value", item.fileName()}}},
-                    {"type", item.isDir() ? "folder" : "file"}, {"totalStorageSize", item.size()}});
+                QJsonObject node {{"name", QJsonObject {{"ok", true}, {"value", item.fileName()}}},
+                    {"type", item.isDir() ? "folder" : "file"}, {"totalStorageSize", item.size()}};
+                if (item.isFile() && includeListingContentSize && item.fileName() != omitListingMetadataName) {
+                    node.insert("activeRevision", QJsonObject {{"claimedSize", item.size()}});
+                    if (includeSha256) {
+                        QFile contents(item.filePath());
+                        if (!contents.open(QIODevice::ReadOnly)) return failure("Metadata read failed");
+                        node.insert("sha256", QString::fromLatin1(QCryptographicHash::hash(contents.readAll(), QCryptographicHash::Sha256).toHex()));
+                    }
+                }
+                items.append(node);
             }
             return {0, QString::fromUtf8(QJsonDocument(items).toJson()), {}};
         }

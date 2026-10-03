@@ -13,6 +13,9 @@ GroupBox {
     property int selectedCopyIndex: -1
     property string selectedCopyPath: ""
     property var selectionLookup: ({})
+    property int selectionRevision: 0
+    property int selectedCount: 0
+    property bool updatingSelection: false
     property var contextStates: ({})
     property string contextKey: ""
     property real screenScrollY: -1
@@ -73,9 +76,58 @@ GroupBox {
     }
 
     onSelectedIndexesChanged: {
+        if (updatingSelection) return
+        // Bulk assignments (refresh/context restoration) become owned JS arrays,
+        // so ordinary toggles can mutate them without copying a Qt sequence.
+        updatingSelection = true
+        selectedIndexes = selectedIndexes.slice()
+        updatingSelection = false
         const lookup = Object.create(null)
-        selectedIndexes.forEach(function (index) { lookup[index] = true })
+        selectedIndexes.forEach(function (index, position) { lookup[index] = position })
         selectionLookup = lookup
+        selectedCount = selectedIndexes.length
+        ++selectionRevision
+    }
+
+    onSelectedPathsChanged: {
+        if (updatingSelection) return
+        updatingSelection = true
+        selectedPaths = selectedPaths.slice()
+        updatingSelection = false
+    }
+
+    function toggleSelection(index, path, checked) {
+        const position = selectionLookup[index]
+        if (checked === (position !== undefined)) return
+        if (selectedPaths.length !== selectedIndexes.length) {
+            // An external bulk assignment may provide only indexes.
+            const entries = controller.entries
+            selectedPaths = selectedIndexes.map(function (selectedIndex) { return entries[selectedIndex] })
+        }
+        if (checked) {
+            selectionLookup[index] = selectedIndexes.length
+            selectedIndexes.push(index)
+            selectedPaths.push(path)
+        } else {
+            // Selection order is immaterial; swap with the last item to avoid
+            // shifting the rest of a large selection on every deselection.
+            const last = selectedIndexes.length - 1
+            const movedIndex = selectedIndexes[last]
+            selectedIndexes[position] = movedIndex
+            selectedPaths[position] = selectedPaths[last]
+            selectionLookup[movedIndex] = position
+            selectedIndexes.pop()
+            selectedPaths.pop()
+            delete selectionLookup[index]
+        }
+        selectedCount = selectedIndexes.length
+        ++selectionRevision
+        // Preserve the public property notifications without rebuilding lookup
+        // or path arrays. Only visible delegates reevaluate their checked state.
+        updatingSelection = true
+        selectedIndexesChanged()
+        selectedPathsChanged()
+        updatingSelection = false
     }
 
     function focusSearch(viewport) {
@@ -235,21 +287,11 @@ GroupBox {
                 objectName: "restoreFile-" + index
                 text: modelData
                 width: restoreList.width
-                checked: panel.selectionLookup[index] === true
-                onToggled: {
-                    let selected = panel.selectedIndexes.slice()
-                    const position = selected.indexOf(index)
-                    if (checked && position < 0) {
-                        selected.push(index)
-                    } else if (!checked && position >= 0) {
-                        selected.splice(position, 1)
-                    }
-                    panel.selectedIndexes = selected
-                    const entries = panel.controller.entries
-                    panel.selectedPaths = selected.map(function (selectedIndex) {
-                        return entries[selectedIndex]
-                    })
+                checked: {
+                    panel.selectionRevision
+                    return panel.selectionLookup[index] !== undefined
                 }
+                onToggled: panel.toggleSelection(index, modelData, checked)
             }
         }
 
@@ -265,7 +307,7 @@ GroupBox {
 
         Label {
             objectName: "restoreSelectionCount"
-            text: qsTr("Selected files: %1").arg(panel.selectedIndexes.length)
+            text: qsTr("Selected files: %1").arg(panel.selectedCount)
             color: panel.style.mutedColor
             Layout.fillWidth: true
         }
@@ -317,7 +359,7 @@ GroupBox {
             objectName: "startRestoreButton"
             text: qsTr("Start restore")
             Layout.alignment: Qt.AlignRight
-            enabled: panel.controller.restoreEligible && panel.selectedIndexes.length > 0 && destinationField.text.trim().length > 0
+            enabled: panel.controller.restoreEligible && panel.selectedCount > 0 && destinationField.text.trim().length > 0
             onClicked: panel.controller.restoreSelected(panel.selectedIndexes, destinationField.text.trim())
         }
     }

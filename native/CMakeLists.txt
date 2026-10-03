@@ -15,6 +15,7 @@ add_library(omacustos-core STATIC
     src/backupengine.cpp
     src/backupmanifest.cpp
     src/backupcatalog.cpp
+    src/remotemetadatacache.h
     src/backupecleanup.cpp
     src/backupconfig.cpp
     src/backupschedule.cpp
@@ -138,3 +139,6 @@ omacustos_add_test(retention-discovery-test tests/retention_discovery_test.cpp o
 qt_add_executable(responsiveness-benchmark tests/responsiveness_benchmark.cpp)
 target_link_libraries(responsiveness-benchmark PRIVATE omacustos-controllers Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Test)
 target_compile_definitions(responsiveness-benchmark PRIVATE OMACUSTOS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+qt_add_executable(manifest-benchmark tests/manifest_benchmark.cpp)
+target_link_libraries(manifest-benchmark PRIVATE omacustos-core)

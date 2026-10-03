@@ -56,6 +56,8 @@ private slots:
     void failedRestorePreservesExistingContent();
     void successfulRestorePreservesUnrelatedBasename_data();
     void successfulRestorePreservesUnrelatedBasename();
+    void restoresEmptyAndMultiChunkPayloads_data();
+    void restoresEmptyAndMultiChunkPayloads();
     void finalPlacementFailurePreservesExistingFolder();
     void finalPlacementFailurePreservesReadOnlyFile();
     void rejectsUnsafeRestoreDestinations_data();
@@ -331,6 +333,50 @@ void ProtonCliFixtureTest::finalPlacementFailurePreservesExistingFolder()
     QCOMPARE(QDir(destination.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList {"notes.txt"});
     QVERIFY(!provider.download("/copy/notes.txt", destination.filePath("notes.txt"), &error));
     QCOMPARE(readFile(destination.filePath("notes.txt/keep.txt")), QByteArray("existing folder child"));
+}
+
+void ProtonCliFixtureTest::restoresEmptyAndMultiChunkPayloads_data()
+{
+    QTest::addColumn<int>("size");
+    QTest::addColumn<bool>("checksum");
+    QTest::addColumn<int>("failure");
+    const int largeSize = 2 * 1024 * 1024 + 13;
+    for (bool checksum : {false, true}) {
+        QTest::newRow(checksum ? "empty checked" : "empty size only")
+            << 0 << checksum << int(FilesystemRunner::Failure::None);
+        QTest::newRow(checksum ? "multi-chunk checked" : "multi-chunk size only")
+            << largeSize << checksum << int(FilesystemRunner::Failure::None);
+    }
+    QTest::newRow("multi-chunk checksum mismatch") << largeSize << true << int(FilesystemRunner::Failure::CorruptOutput);
+    QTest::newRow("multi-chunk size mismatch") << largeSize << false << int(FilesystemRunner::Failure::TruncatedOutput);
+}
+
+void ProtonCliFixtureTest::restoresEmptyAndMultiChunkPayloads()
+{
+    QFETCH(int, size);
+    QFETCH(bool, checksum);
+    QFETCH(int, failure);
+    QTemporaryDir destination;
+    FilesystemRunner runner;
+    QByteArray contents(size, 'x');
+    if (size > 0) {
+        contents[1024 * 1024 - 1] = '\0';
+        contents[1024 * 1024] = 'y';
+        contents[size - 1] = 'z';
+    }
+    QVERIFY(writeFile(runner.remoteFile("/copy/payload"), contents));
+    QVERIFY(writeFile(destination.filePath("payload"), "existing content"));
+    const BackupEntry entry {"/source/payload", "/copy/payload", size,
+        checksum ? QCryptographicHash::hash(contents, QCryptographicHash::Sha256) : QByteArray(), "payload"};
+    runner.downloadFailure = static_cast<FilesystemRunner::Failure>(failure);
+    ProtonProvider provider(runner);
+    BackupEngine engine;
+    QString error;
+    const bool success = failure == int(FilesystemRunner::Failure::None);
+    QCOMPARE(engine.restoreFile(entry, destination.path(), provider, &error), success);
+    QCOMPARE(readFile(destination.filePath("payload")), success ? contents : QByteArray("existing content"));
+    if (!success) QCOMPARE(error, QString("The restored file failed verification."));
+    QCOMPARE(QDir(destination.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden), QStringList {"payload"});
 }
 
 void ProtonCliFixtureTest::finalPlacementFailurePreservesReadOnlyFile()

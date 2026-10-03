@@ -76,6 +76,7 @@ private slots:
     void sizeOnlyMetadataDoesNotReuseDifferentContent();
     void reservesManifestPathForSourceFiles();
     void previewsMultipleSourcesAndExclusions();
+    void cancelledPreviewStopsTraversalAndDiscardsPartialResults();
     void excludesMatchingFolderNamesAtEveryDepth_data();
     void excludesMatchingFolderNamesAtEveryDepth();
     void absoluteExclusionDoesNotExcludeSameNamedFoldersElsewhere();
@@ -550,6 +551,25 @@ void BackupEngineTest::excludesMatchingFolderNamesAtEveryDepth_data()
     QTest::addColumn<QString>("rule");
     QTest::newRow("folder name") << QStringLiteral("node_modules");
     QTest::newRow("trailing slash") << QStringLiteral("node_modules/");
+}
+
+void BackupEngineTest::cancelledPreviewStopsTraversalAndDiscardsPartialResults()
+{
+    QTemporaryDir source;
+    for (int i = 0; i < 100; ++i) {
+        QFile file(source.filePath(QString("file-%1").arg(i)));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("payload");
+    }
+    BackupEngine engine;
+    int checks = 0;
+    const auto cancelled = engine.preview({source.path()}, {}, [&] { return ++checks >= 10; });
+    QVERIFY(checks >= 10 && checks < 100);
+    QVERIFY(cancelled.includedFiles.isEmpty());
+    QVERIFY(cancelled.excludedFiles.isEmpty());
+    QVERIFY(cancelled.skippedPaths.isEmpty());
+    QVERIFY(cancelled.missingPaths.isEmpty());
+    QCOMPARE(engine.preview({source.path()}, {}).includedFiles.size(), 100);
 }
 
 void BackupEngineTest::excludesMatchingFolderNamesAtEveryDepth()

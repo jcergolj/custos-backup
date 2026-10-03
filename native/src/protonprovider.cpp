@@ -12,10 +12,52 @@
 #include <QtMath>
 
 #include <optional>
+#include <limits>
+
+namespace {
+
+bool contentMetadata(const QJsonObject &object, const QString &path, RemoteFile *file)
+{
+    const QJsonValue size = object.contains(QStringLiteral("size"))
+        ? object.value(QStringLiteral("size"))
+        : object.value(QStringLiteral("activeRevision")).toObject().value(QStringLiteral("claimedSize"));
+    const QString hex = object.value(QStringLiteral("sha256")).toString();
+    const QByteArray checksum = QByteArray::fromHex(hex.toLatin1());
+    if ((object.contains(QStringLiteral("sha256")) && !object.value(QStringLiteral("sha256")).isString())
+        || !size.isDouble() || !qIsFinite(size.toDouble()) || size.toDouble() < 0
+        || size.toDouble() >= static_cast<double>(std::numeric_limits<qint64>::max())
+        || size.toDouble() != qFloor(size.toDouble())
+        || (!hex.isEmpty() && (checksum.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256)
+            || QString::fromLatin1(checksum.toHex()) != hex.toLower()))) {
+        return false;
+    }
+    *file = {path, static_cast<qint64>(size.toDouble()), checksum};
+    return true;
+}
+
+QString itemName(const QJsonObject &object)
+{
+    const QJsonValue name = object.value(QStringLiteral("name"));
+    return name.isObject() ? name.toObject().value(QStringLiteral("value")).toString() : name.toString();
+}
+
+}
 
 ProtonProvider::ProtonProvider(ProcessRunner &runner)
     : runner(runner)
 {
+}
+
+void ProtonProvider::beginBackupOperation()
+{
+    ensuredDirectories.clear();
+    backupOperation = true;
+}
+
+void ProtonProvider::endBackupOperation()
+{
+    backupOperation = false;
+    ensuredDirectories.clear();
 }
 
 bool ProtonProvider::upload(const QString &localPath, const QString &remotePath, QString *error)
@@ -51,11 +93,15 @@ bool ProtonProvider::upload(const QString &localPath, const QString &remotePath,
         }
     }
 
-    return run({
+    const bool uploaded = run({
         QStringLiteral("filesystem"), QStringLiteral("upload"), QStringLiteral("-j"),
         QStringLiteral("-f"), QStringLiteral("replace"), QStringLiteral("-d"), QStringLiteral("replace"),
         QStringLiteral("-t"), uploadPath, QFileInfo(remotePath).path(),
     }, error);
+    // The engine retries after ensuring the parent again. Any ancestor may have
+    // disappeared, so that recheck must not trust this operation's cache.
+    if (!uploaded) ensuredDirectories.clear();
+    return uploaded;
 }
 
 bool ProtonProvider::ensureDirectory(const QString &remotePath, QString *error)
@@ -73,14 +119,18 @@ bool ProtonProvider::ensureDirectory(const QString &remotePath, QString *error)
             current += QStringLiteral("/");
         }
         current += part;
+        if (backupOperation && ensuredDirectories.contains(current)) continue;
         QVector<RemoteItem> children;
         QString listError;
         if (list(current, &children, &listError)) {
+            if (backupOperation) ensuredDirectories.insert(current);
             continue;
         }
         if (!run({QStringLiteral("filesystem"), QStringLiteral("create-folder"), QFileInfo(current).path(), part}, error)) {
+            ensuredDirectories.clear();
             return false;
         }
+        if (backupOperation) ensuredDirectories.insert(current);
     }
     return true;
 }
@@ -112,6 +162,14 @@ bool ProtonProvider::download(const QString &remotePath, const QString &localPat
     }
 
     QFile downloaded(staging.filePath(QFileInfo(remotePath).fileName()));
+    // Engine downloads target an unused path inside private staging on this
+    // filesystem. Move those bytes instead of copying them into a second file.
+    // QFile::rename never overwrites an existing destination; those callers
+    // retain the atomic replacement path below.
+    if (!QFileInfo::exists(localPath) && !QFileInfo(localPath).isSymLink()
+        && downloaded.rename(localPath)) {
+        return true;
+    }
     QSaveFile destination(localPath);
     destination.setDirectWriteFallback(false);
     const auto placementFailure = [&] {
@@ -151,17 +209,9 @@ bool ProtonProvider::inspect(const QString &remotePath, RemoteFile *file, QStrin
 
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(output.standardOutput.toUtf8(), &parseError);
-    const QJsonObject object = document.object();
-    const QJsonObject revision = object.value(QStringLiteral("activeRevision")).toObject();
     // Storage sizes include encryption overhead and cannot verify local file contents.
-    const QJsonValue size = object.contains(QStringLiteral("size"))
-        ? object.value(QStringLiteral("size"))
-        : revision.value(QStringLiteral("claimedSize"));
-
-    const QByteArray checksum = QByteArray::fromHex(object.value(QStringLiteral("sha256")).toString().toLatin1());
-    if (parseError.error != QJsonParseError::NoError || !document.isObject() || !size.isDouble()
-        || size.toDouble() < 0 || size.toDouble() != qFloor(size.toDouble())
-        || (!checksum.isEmpty() && checksum.size() != QCryptographicHash::hashLength(QCryptographicHash::Sha256))) {
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()
+        || !contentMetadata(document.object(), remotePath, file)) {
         if (error != nullptr) {
             *error = QStringLiteral("Proton Drive returned invalid file metadata.");
         }
@@ -169,9 +219,6 @@ bool ProtonProvider::inspect(const QString &remotePath, RemoteFile *file, QStrin
         return false;
     }
 
-    file->path = remotePath;
-    file->size = static_cast<qint64>(size.toDouble());
-    file->checksum = checksum;
     if (error != nullptr) {
         error->clear();
     }
@@ -188,46 +235,15 @@ bool ProtonProvider::list(const QString &remotePath, QVector<RemoteItem> *items,
         return false;
     }
 
-    const ProcessOutput output = runner.run({
-        QStringLiteral("filesystem"), QStringLiteral("list"), QStringLiteral("-j"), remotePath,
-    });
-    if (!output.successful()) {
-        if (error != nullptr) {
-            *error = output.standardError.isEmpty() ? QStringLiteral("Unable to list the Proton Drive folder.") : output.standardError.trimmed();
-        }
-        return false;
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(output.standardOutput.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        if (error != nullptr) {
-            *error = QStringLiteral("Proton Drive returned invalid folder metadata.");
-        }
-        return false;
-    }
-
     QJsonArray values;
-    if (document.isArray()) {
-        values = document.array();
-    } else if (document.isObject()) {
-        const QJsonObject object = document.object();
-        values = object.value(QStringLiteral("items")).toArray();
-        if (values.isEmpty()) {
-            values = object.value(QStringLiteral("entries")).toArray();
-        }
-    }
-
+    if (!listing(remotePath, &values, error)) return false;
     items->clear();
     for (const QJsonValue &value : values) {
         if (!value.isObject()) {
             continue;
         }
         const QJsonObject object = value.toObject();
-        const QJsonValue nameValue = object.value(QStringLiteral("name"));
-        const QString name = nameValue.isObject()
-            ? nameValue.toObject().value(QStringLiteral("value")).toString()
-            : nameValue.toString();
+        const QString name = itemName(object);
         const QString path = object.value(QStringLiteral("path")).toString(
             name.isEmpty() ? QString() : QDir(remotePath).filePath(name));
         const QString type = object.value(QStringLiteral("type")).toString().toLower();
@@ -250,13 +266,78 @@ bool ProtonProvider::list(const QString &remotePath, QVector<RemoteItem> *items,
     return true;
 }
 
+bool ProtonProvider::listing(const QString &remotePath, QJsonArray *values, QString *error)
+{
+    const ProcessOutput output = runner.run({
+        QStringLiteral("filesystem"), QStringLiteral("list"), QStringLiteral("-j"), remotePath,
+    });
+    if (!output.successful()) {
+        if (error != nullptr) {
+            *error = output.standardError.isEmpty() ? QStringLiteral("Unable to list the Proton Drive folder.") : output.standardError.trimmed();
+        }
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(output.standardOutput.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Proton Drive returned invalid folder metadata.");
+        }
+        return false;
+    }
+
+    if (document.isArray()) {
+        *values = document.array();
+    } else if (document.isObject()) {
+        const QJsonObject object = document.object();
+        *values = object.value(QStringLiteral("items")).toArray();
+        if (values->isEmpty()) {
+            *values = object.value(QStringLiteral("entries")).toArray();
+        }
+    }
+    return true;
+}
+
+bool ProtonProvider::inspectDirectoryFiles(const QString &remotePath, QVector<RemoteFile> *files, QString *error)
+{
+    if (files == nullptr) return false;
+    files->clear();
+    QJsonArray values;
+    if (!listing(remotePath, &values, error)) return false;
+    const QString root = QDir::cleanPath(remotePath);
+    QSet<QString> seen, ambiguous;
+    for (const QJsonValue &value : values) {
+        if (!value.isObject()) continue;
+        const QJsonObject object = value.toObject();
+        const QString name = itemName(object);
+        if (name.isEmpty() || name.contains('/') || name == "." || name == "..") continue;
+        const QString path = object.value(QStringLiteral("path")).toString(QDir(root).filePath(name));
+        if (path != QDir::cleanPath(path) || QFileInfo(path).path() != root
+            || QFileInfo(path).fileName() != name) continue;
+        if (seen.contains(path)) ambiguous.insert(path);
+        seen.insert(path);
+        const QString type = object.value(QStringLiteral("type")).toString().toLower();
+        if (type != QStringLiteral("file") || object.value(QStringLiteral("directory")).toBool()
+            || object.value(QStringLiteral("is_dir")).toBool()) continue;
+        RemoteFile file;
+        if (contentMetadata(object, path, &file)) files->append(file);
+    }
+    files->removeIf([&](const RemoteFile &file) { return ambiguous.contains(file.path); });
+    // Storage-only/empty listings cannot verify any files. Let callers disable
+    // this optimization for the remaining directories in this verification.
+    return !files->isEmpty();
+}
+
 bool ProtonProvider::trash(const QString &remotePath, QString *error)
 {
+    ensuredDirectories.clear();
     return run({QStringLiteral("filesystem"), QStringLiteral("trash"), remotePath}, error);
 }
 
 bool ProtonProvider::permanentlyDelete(const QString &remotePath, QString *error)
 {
+    ensuredDirectories.clear();
     return run({QStringLiteral("filesystem"), QStringLiteral("delete"), remotePath}, error);
 }
 

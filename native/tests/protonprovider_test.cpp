@@ -10,6 +10,8 @@
 
 #include "../src/backupengine.h"
 #include "../src/backupmanifest.h"
+#include "../src/backupcatalog.h"
+#include "../src/backupecleanup.h"
 #include "../src/protonprovider.h"
 #include "protonclifixture.h"
 
@@ -41,7 +43,17 @@ private slots:
     void backsUpAndRestoresReservedAndCollisionNames();
     void failedPayloadsAreNotVerified_data();
     void failedPayloadsAreNotVerified();
+    void sharedDestinationDoesNotRepeatDirectoryChecks_data();
     void sharedDestinationDoesNotRepeatDirectoryChecks();
+    void freshCopyVerificationRejectsChangedPayloads_data();
+    void freshCopyVerificationRejectsChangedPayloads();
+    void nestedDirectoriesShareAncestorsOnlyWithinOperation_data();
+    void nestedDirectoriesShareAncestorsOnlyWithinOperation();
+    void failedUploadRechecksMissingAncestors();
+    void verifiesCopiesUsingBulkMetadataWithIndividualFallback_data();
+    void verifiesCopiesUsingBulkMetadataWithIndividualFallback();
+    void bulkMetadataIgnoresUnsafeAndUnverifiableEntries();
+    void bulkVerificationPreservesRetentionAndCancellationGates();
     void inspectParsesVerifiedMetadata();
     void inspectParsesCliMetadataWithoutSha256();
     void inspectUsesContentSizeInsteadOfEncryptedStorageSize();
@@ -52,19 +64,45 @@ private slots:
     void listsRemoteItemsAndUsesExactCleanupCommands();
 };
 
+void ProtonProviderTest::sharedDestinationDoesNotRepeatDirectoryChecks_data()
+{
+    QTest::addColumn<bool>("freshCopy");
+    QTest::addColumn<bool>("listingMetadata");
+    QTest::addColumn<bool>("partialMetadata");
+    QTest::addColumn<int>("folderCount");
+    QTest::newRow("existing namespace") << false << false << false << 1;
+    QTest::newRow("fresh namespace storage-only fallback") << true << false << false << 1;
+    QTest::newRow("fresh namespace bulk verification") << true << true << false << 1;
+    QTest::newRow("fresh namespace partial metadata") << true << true << true << 1;
+    QTest::newRow("two folders bulk verification") << true << true << false << 2;
+    QTest::newRow("two folders partial metadata") << true << true << true << 2;
+    QTest::newRow("two folders disable unsupported bulk") << true << false << false << 2;
+}
+
 void ProtonProviderTest::sharedDestinationDoesNotRepeatDirectoryChecks()
 {
+    QFETCH(bool, freshCopy);
+    QFETCH(bool, listingMetadata);
+    QFETCH(bool, partialMetadata);
+    QFETCH(int, folderCount);
     QTemporaryDir source;
     FilesystemRunner runner;
-    for (int i = 0; i < 100; ++i) {
-        QFile file(source.filePath(QString("file-%1.txt").arg(i)));
-        QVERIFY(file.open(QIODevice::WriteOnly));
-        QCOMPARE(file.write("payload"), qint64(7));
+    runner.includeListingContentSize = listingMetadata;
+    runner.omitListingMetadataName = partialMetadata ? "file-0.txt" : "";
+    for (int folder = 0; folder < folderCount; ++folder) {
+        const QString parent = folderCount == 1 ? source.path() : source.filePath(QString("folder-%1").arg(folder));
+        QVERIFY(QDir().mkpath(parent));
+        for (int i = 0; i < 100 / folderCount; ++i) {
+            QFile file(QDir(parent).filePath(QString("file-%1.txt").arg(i)));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write("payload"), qint64(7));
+        }
     }
     BackupEngine engine;
     ProtonProvider provider(runner);
     QString manifest, error;
-    QVERIFY2(engine.backup(source.path(), "/backups/copy", provider, &manifest, &error), qPrintable(error));
+    QVERIFY2(engine.backup({source.path()}, "/backups/copy", {}, {}, provider,
+        &manifest, &error, {}, nullptr, {freshCopy}), qPrintable(error));
     const auto cleanup = qScopeGuard([&] { QDir(QFileInfo(manifest).absolutePath()).removeRecursively(); });
     int lists = 0, inspections = 0, uploads = 0;
     for (const auto &call : runner.calls) {
@@ -72,11 +110,177 @@ void ProtonProviderTest::sharedDestinationDoesNotRepeatDirectoryChecks()
         inspections += call.at(1) == "info";
         uploads += call.at(1) == "upload";
     }
-    QCOMPARE(lists, 2);
+    const int parentChecks = folderCount == 1 ? 2 : 2 + folderCount;
+    QCOMPARE(lists, parentChecks + (freshCopy ? listingMetadata ? folderCount : 1 : 0));
     QCOMPARE(uploads, 101);
-    // Both pre-upload and post-upload verification remain for every payload,
-    // plus the uploaded manifest's metadata verification.
-    QCOMPARE(inspections, 201);
+    QCOMPARE(inspections, !freshCopy ? 201 : !listingMetadata ? 101 : partialMetadata ? folderCount + 1 : 1);
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifest, &entries));
+    QCOMPARE(entries.size(), 100);
+}
+
+void ProtonProviderTest::freshCopyVerificationRejectsChangedPayloads_data()
+{
+    QTest::addColumn<QString>("damage");
+    QTest::addColumn<bool>("bulk");
+    for (bool bulk : {false, true}) {
+        for (const QString &damage : {QString("removed"), QString("truncated"), QString("corrupted"), QString("listing failure")}) {
+            QTest::newRow(qPrintable(damage + (bulk ? " bulk" : " individual"))) << damage << bulk;
+        }
+    }
+}
+
+void ProtonProviderTest::freshCopyVerificationRejectsChangedPayloads()
+{
+    QFETCH(QString, damage);
+    QFETCH(bool, bulk);
+    class ChangingRunner final : public ProcessRunner {
+    public:
+        FilesystemRunner filesystem;
+        QString damage;
+        ProcessOutput run(const QStringList &arguments) override
+        {
+            const auto result = filesystem.run(arguments);
+            // Change the first uploaded payload after the last upload. Only
+            // fresh post-upload metadata may establish manifest eligibility.
+            if (arguments.at(1) == "upload" && QFileInfo(arguments.at(arguments.size() - 2)).fileName() == "z-good") {
+                const QString path = filesystem.remoteFile("/backups/copy/a-bad");
+                if (damage == "removed") {
+                    QFile::remove(path);
+                } else if (damage == "listing failure") {
+                    filesystem.failListPath = "/backups/copy";
+                } else {
+                    QFile file(path);
+                    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                    if (!file.open(QIODevice::WriteOnly)) return {1, {}, "Fixture mutation failed"};
+                    file.write(damage == "truncated" ? "x" : "corrupt");
+                }
+            }
+            return result;
+        }
+    } runner;
+    runner.damage = damage;
+    runner.filesystem.includeListingContentSize = bulk;
+    runner.filesystem.includeSha256 = true;
+    QTemporaryDir source;
+    for (const QString &name : {QString("a-bad"), QString("z-good")}) {
+        QFile file(source.filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("payload"), qint64(7));
+    }
+    BackupEngine engine;
+    ProtonProvider provider(runner);
+    const BackupCopyMetadata metadata {"computer", "documents", "Documents", "copy", QDateTime::currentDateTimeUtc()};
+    QString manifest, error;
+    BackupResult result;
+    QVector<BackupProgress> samples;
+    const bool success = damage == "listing failure";
+    QCOMPARE(engine.backup({source.path()}, "/backups/copy", {}, metadata, provider, &manifest, &error,
+        [&](const BackupProgress &progress) { samples.append(progress); }, &result, {true}), success);
+    QVERIFY(!manifest.isEmpty());
+    const auto cleanup = qScopeGuard([&] { QDir(QFileInfo(manifest).path()).removeRecursively(); });
+    QVector<BackupEntry> entries;
+    BackupManifestInfo info;
+    QVERIFY2(BackupManifest::load(manifest, &entries, &info, &error), qPrintable(error));
+    QCOMPARE(entries.size(), success ? 2 : 1);
+    QCOMPARE(result.verifiedFiles, entries.size());
+    QCOMPARE(result.verifiedBytes, qint64(entries.size() * 7));
+    QVERIFY(result.manifestVerified);
+    QCOMPARE(info.status, success ? QString("complete") : QString("incomplete"));
+    QCOMPARE(result.issues.size(), success ? 0 : 1);
+    if (!success) {
+        QCOMPARE(info.failedItems, QStringList {"a-bad"});
+        QCOMPARE(entries.first().restorePath, QString("z-good"));
+        QCOMPARE(result.issues.first().phase, QString("verifying"));
+    }
+    QCOMPARE(samples.last().processedFiles, 2);
+    QCOMPARE(samples.last().verifiedFiles, entries.size());
+    for (const BackupProgress &sample : samples) {
+        if (sample.phase == "uploading") QCOMPARE(sample.verifiedFiles, 0);
+    }
+    for (const QString &path : runner.filesystem.uploadedPaths) {
+        if (path != manifest) QVERIFY(!QFileInfo::exists(path));
+    }
+}
+
+void ProtonProviderTest::nestedDirectoriesShareAncestorsOnlyWithinOperation_data()
+{
+    QTest::addColumn<bool>("failManifest");
+    QTest::newRow("successful operation") << false;
+    QTest::newRow("early failure") << true;
+}
+
+void ProtonProviderTest::nestedDirectoriesShareAncestorsOnlyWithinOperation()
+{
+    QFETCH(bool, failManifest);
+    QTemporaryDir source;
+    FilesystemRunner runner;
+    for (const QString &path : {QString("src/components/one"), QString("src/pages/two")}) {
+        QVERIFY(QDir().mkpath(QFileInfo(source.filePath(path)).path()));
+        QFile file(source.filePath(path));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("payload");
+    }
+    runner.failUploadName = failManifest ? "manifest.json" : "";
+    BackupEngine engine;
+    ProtonProvider provider(runner);
+    QString manifest, error;
+    QCOMPARE(engine.backup(source.path(), "/backups/copy", provider, &manifest, &error), !failManifest);
+    const auto cleanup = qScopeGuard([&] {
+        if (!manifest.isEmpty()) QDir(QFileInfo(manifest).path()).removeRecursively();
+    });
+    QStringList listed;
+    for (const auto &call : runner.calls) if (call.at(1) == "list") listed.append(call.last());
+    QCOMPARE(listed, (QStringList {"/backups", "/backups/copy", "/backups/copy/src",
+        "/backups/copy/src/components", "/backups/copy/src/pages"}));
+
+    // Operation completion (also an early return) must stop trusting ancestors.
+    QVERIFY(QDir(runner.remoteFile("/backups")).removeRecursively());
+    runner.calls.clear();
+    QVERIFY2(provider.ensureDirectory("/backups/copy/src/pages", &error), qPrintable(error));
+    QVERIFY(QFileInfo(runner.remoteFile("/backups/copy/src/pages")).isDir());
+    listed.clear();
+    for (const auto &call : runner.calls) if (call.at(1) == "list") listed.append(call.last());
+    QCOMPARE(listed, (QStringList {"/backups", "/backups/copy", "/backups/copy/src", "/backups/copy/src/pages"}));
+}
+
+void ProtonProviderTest::failedUploadRechecksMissingAncestors()
+{
+    class RemovingRunner final : public ProcessRunner {
+    public:
+        FilesystemRunner filesystem;
+        bool removed = false;
+        ProcessOutput run(const QStringList &arguments) override
+        {
+            if (!removed && arguments.at(1) == "upload") {
+                removed = true;
+                QDir(filesystem.remoteFile("/backups")).removeRecursively();
+            }
+            return filesystem.run(arguments);
+        }
+    } runner;
+    QTemporaryDir source;
+    QVERIFY(QDir().mkpath(source.filePath("nested")));
+    QFile file(source.filePath("nested/one"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("payload");
+    file.close();
+    BackupEngine engine;
+    ProtonProvider provider(runner);
+    QString manifest, error;
+    QVERIFY2(engine.backup({source.path()}, "/backups/copy", {}, {}, provider,
+        &manifest, &error, {}, nullptr, {true}), qPrintable(error));
+    const auto cleanup = qScopeGuard([&] { QDir(QFileInfo(manifest).path()).removeRecursively(); });
+    QStringList listed;
+    for (const auto &call : runner.filesystem.calls) if (call.at(1) == "list") listed.append(call.last());
+    QCOMPARE(listed, (QStringList {"/backups", "/backups/copy", "/backups/copy/nested",
+        "/backups", "/backups/copy", "/backups/copy/nested", "/backups/copy/nested"}));
+    QVector<BackupEntry> entries;
+    QVERIFY(BackupManifest::load(manifest, &entries));
+    QCOMPARE(entries.size(), 1);
+    QFile uploaded(runner.filesystem.remoteFile(entries.first().remotePath));
+    QVERIFY(uploaded.open(QIODevice::ReadOnly));
+    QCOMPARE(QCryptographicHash::hash(uploaded.readAll(), QCryptographicHash::Sha256), entries.first().checksum);
 }
 
 void ProtonProviderTest::uploadUsesJsonCliArguments()
@@ -93,6 +297,124 @@ void ProtonProviderTest::uploadUsesJsonCliArguments()
     };
 
     QCOMPARE(runner.arguments, expected);
+}
+
+void ProtonProviderTest::verifiesCopiesUsingBulkMetadataWithIndividualFallback_data()
+{
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<int>("listCount");
+    QTest::addColumn<int>("inspectCount");
+    QTest::newRow("content metadata") << QString("full") << 2 << 0;
+    QTest::newRow("partial content metadata") << QString("partial") << 2 << 2;
+    QTest::newRow("storage metadata only") << QString("storage") << 1 << 100;
+    QTest::newRow("failed listing") << QString("failed") << 1 << 100;
+}
+
+void ProtonProviderTest::verifiesCopiesUsingBulkMetadataWithIndividualFallback()
+{
+    QFETCH(QString, mode);
+    QFETCH(int, listCount);
+    QFETCH(int, inspectCount);
+    QTemporaryDir source;
+    FilesystemRunner runner;
+    for (const QString &folder : {QString("one"), QString("two")}) {
+        QVERIFY(QDir().mkpath(source.filePath(folder)));
+        for (int i = 0; i < 50; ++i) {
+            QFile file(source.filePath(QString("%1/file-%2").arg(folder).arg(i)));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("payload");
+        }
+    }
+    ProtonProvider provider(runner);
+    BackupEngine engine;
+    QString manifest, error;
+    const BackupCopyMetadata metadata {"computer", "documents", "Documents", "copy", QDateTime::currentDateTimeUtc()};
+    QVERIFY2(engine.backup({source.path()}, "/backups/copy", {}, metadata, provider,
+        &manifest, &error, {}, nullptr, {true}), qPrintable(error));
+    const auto cleanup = qScopeGuard([&] { QDir(QFileInfo(manifest).path()).removeRecursively(); });
+    runner.calls.clear();
+    runner.includeListingContentSize = mode != "storage";
+    runner.includeSha256 = true;
+    runner.omitListingMetadataName = mode == "partial" ? "file-0" : "";
+    runner.failListPath = mode == "failed" ? "/backups/copy/one" : "";
+    RemoteCopy copy;
+    QVERIFY2(BackupCatalog::verifyCopy(provider, "/backups/copy", "documents", &copy, &error), qPrintable(error));
+    QCOMPARE(copy.entries.size(), 100);
+    QVERIFY(copy.complete());
+    int lists = 0, inspections = 0;
+    for (const auto &call : runner.calls) {
+        lists += call.at(1) == "list";
+        inspections += call.at(1) == "info";
+    }
+    QCOMPARE(lists, listCount);
+    QCOMPARE(inspections, inspectCount);
+}
+
+void ProtonProviderTest::bulkMetadataIgnoresUnsafeAndUnverifiableEntries()
+{
+    FakeRunner runner;
+    runner.response = {0, QStringLiteral(R"([
+        {"name":"valid","type":"file","totalStorageSize":513,"activeRevision":{"claimedSize":17}},
+        {"name":"empty","type":"file","size":0},
+        {"name":"storage-only","type":"file","totalStorageSize":17},
+        {"name":"negative","type":"file","size":-1},
+        {"name":"fractional","type":"file","size":1.5},
+        {"name":"oversized","type":"file","size":1e30},
+        {"name":"bad-sha","type":"file","size":17,"sha256":"invalid"},
+        {"name":"bad-sha-type","type":"file","size":17,"sha256":123},
+        {"name":"folder","type":"folder","size":17},
+        {"name":"escape","path":"/elsewhere/escape","type":"file","size":17},
+        {"name":"../traversal","type":"file","size":17},
+        {"name":"duplicate","type":"file","size":17},
+        {"name":"duplicate","type":"file","size":18}
+    ])"), {}};
+    ProtonProvider provider(runner);
+    QVector<RemoteFile> files;
+    QVERIFY(provider.inspectDirectoryFiles("/backups/copy", &files));
+    QCOMPARE(files.size(), 2);
+    QCOMPARE(files.first().path, QString("/backups/copy/valid"));
+    QCOMPARE(files.first().size, qint64(17));
+    QCOMPARE(files.last().size, qint64(0));
+}
+
+void ProtonProviderTest::bulkVerificationPreservesRetentionAndCancellationGates()
+{
+    QTemporaryDir source;
+    FilesystemRunner runner;
+    QFile file(source.filePath("one"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("payload");
+    file.close();
+    ProtonProvider provider(runner);
+    BackupEngine engine;
+    QString manifest, error;
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    for (const QString &id : {QString("old"), QString("new")}) {
+        const BackupCopyMetadata metadata {"computer", "documents", "Documents", id, id == "old" ? now.addDays(-1) : now};
+        QVERIFY(engine.backup({source.path()}, "/backups/" + id, {}, metadata, provider, &manifest, &error));
+        QDir(QFileInfo(manifest).path()).removeRecursively();
+    }
+    runner.includeListingContentSize = true;
+    runner.includeSha256 = true;
+    QFile corrupted(runner.remoteFile("/backups/new/one"));
+    QVERIFY(corrupted.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+    QVERIFY(corrupted.open(QIODevice::WriteOnly));
+    corrupted.write("corrupt"); // Same size; a listing checksum must still reject it.
+    corrupted.close();
+    QVector<RemoteCopy> copies;
+    QVERIFY(BackupCatalog::discoverCopies(provider, "/backups", "documents", &copies, &error));
+    QCOMPARE(copies.size(), 2);
+    QVERIFY(!copies.first().complete());
+    QCOMPARE(copies.first().unavailableItems, QStringList {"one"});
+    QVERIFY(BackupCleanup::eligibleTargets(copies, 1, "computer", "documents").isEmpty());
+
+    runner.calls.clear();
+    RemoteCopy copy;
+    int cancellationChecks = 0;
+    QVERIFY(!BackupCatalog::verifyCopy(provider, "/backups/old", "documents", &copy, &error,
+        [&] { return ++cancellationChecks == 4; }));
+    QCOMPARE(runner.calls.size(), 2); // Manifest download and one directory listing.
+    QVERIFY(copy.entries.isEmpty());
 }
 
 void ProtonProviderTest::uploadsAtExactRequestedPath_data()
@@ -276,7 +598,8 @@ void ProtonProviderTest::failedPayloadsAreNotVerified()
     QString manifest;
     QString error;
     const BackupCopyMetadata metadata {"computer", "set", "Documents", "copy", QDateTime::currentDateTimeUtc()};
-    QVERIFY(!engine.backup({source.path()}, QStringLiteral("/backups/copy"), {}, metadata, provider, &manifest, &error));
+    QVERIFY(!engine.backup({source.path()}, QStringLiteral("/backups/copy"), {}, metadata,
+        provider, &manifest, &error, {}, nullptr, {true}));
     QVERIFY(!manifest.isEmpty());
     const auto cleanupManifest = qScopeGuard([&] { QDir(QFileInfo(manifest).path()).removeRecursively(); });
     QVector<BackupEntry> entries;

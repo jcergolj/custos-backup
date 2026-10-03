@@ -35,6 +35,15 @@ Explicit strategies are required; interactive prompting is not modeled.
 `list` returns actual children, `create-folder` requires an existing parent, and
 `info` supplies `activeRevision.claimedSize`. SHA-256 is absent by default, matching
 the supported CLI metadata; `includeSha256` enables the optional provider field.
+Listings default to encrypted-storage-size-only metadata to exercise the
+conservative fallback. `includeListingContentSize` adds `activeRevision.claimedSize`
+to file entries; it also includes SHA-256 when `includeSha256` is enabled.
+`omitListingMetadataName` and `failListPath` exercise partial metadata and failed
+listings. The upstream CLI's `commandFileSystemList.ts` prints SDK node entities
+as JSON, and the SDK's `NodeEntity.activeRevision` can contain `claimedSize`;
+the provider enables bulk verification only when that field (or content `size`)
+is actually present and valid. The installed CLI's `filesystem list --help` and
+`filesystem info --help` were also checked on 2026-10-03; `info` accepts one path.
 
 ## Failure injection and scope
 
