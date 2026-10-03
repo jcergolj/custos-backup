@@ -175,6 +175,80 @@ Use **Import** to load that file into OmaCustos. Import replaces the configured 
 The file contains sources, exclusions, schedules, and settings. Your backed-up
 files, Proton login, and this computer's global resource preset are not included.
 
+### Create an import file
+
+Download the [annotated backup-set template](backup-sets.template.json)
+([raw file](https://raw.githubusercontent.com/jcergolj/omacustos/HEAD/backup-sets.template.json))
+and save a copy as `my-backup-sets.json`. On GitHub, open the template and use
+**Download raw file**, or save the raw link from your browser.
+
+1. Replace the example source paths with the full paths of your folders and files,
+   such as `/home/alex/Documents` or `/home/alex/notes.txt`. Use your actual username;
+   do not use `~` or environment variables such as `$HOME`.
+2. Set the backup's `name` and `id`. Each set must have a nonempty, unique `id`.
+   To create multiple sets, duplicate the object inside `sets` and edit each copy.
+3. Choose exclusions, the remote folder, retention, and schedule. The template runs
+   **daily at 02:00 in your computer's local time**. Set `frequency` to `disabled`
+   for manual backups, or use `daily`, `weekly`, or `monthly`. Hours are 0–23 and
+   minutes are 0–59; weekdays are 1–7 (Monday–Sunday), and monthly days are 1–31.
+4. Save the file and [validate it](#validate-an-import-file), then press **Import**
+   in OmaCustos and select your file.
+   **Import replaces all configured backup sets**, so export your current sets
+   first if you want to keep a copy. Enabled schedules activate automatic scheduling.
+5. Open each imported set and use **Preview** to check its sources and exclusions.
+
+The template includes `_comment` fields explaining the format and giving LLMs
+instructions for generating a file. OmaCustos ignores these fields; you can keep
+or remove them. JSON does not allow `//` or `/* … */` comments or trailing commas.
+
+### Generate an import file with an LLM
+
+Attach the downloaded template to your LLM conversation and use a prompt like
+this, replacing the paths with your own:
+
+```text
+Using the attached OmaCustos template and its _comment instructions, create
+one backup set named "Personal files" for the following folders and files.
+Run it daily at 02:00 local time, keep 3 successful copies, use
+/my-files/backups as the remote root, and allow backups on battery power.
+Exclude folders named node_modules and vendor.
+
+/home/alex/Documents
+/home/alex/projects
+/home/alex/.config/hypr/hyprland.conf
+
+Return only the complete importable JSON, without Markdown code fences.
+```
+
+Save the response as `my-backup-sets.json`, review the paths and schedule, then
+validate it, import it, and check **Preview** as described above. If you want to
+keep existing sets too, attach an export of those sets and ask the LLM to include
+them in the result while preserving their IDs.
+
+### Validate an import file
+
+Download [the validator](tools/validate_backup_sets.py)
+([raw file](https://raw.githubusercontent.com/jcergolj/omacustos/HEAD/tools/validate_backup_sets.py))
+as `validate_backup_sets.py`. It requires Python 3 and no extra packages:
+
+```bash
+python3 validate_backup_sets.py my-backup-sets.json
+```
+
+From a repository checkout, use
+`python3 tools/validate_backup_sets.py my-backup-sets.json` instead.
+
+The validator checks JSON syntax, the application and version, required fields,
+unique set IDs, value types, and schedule and retention ranges. It accepts the
+template's `_comment` fields and reports errors with field locations, such as
+`sets[0].schedule.hour`. It exits with status **0** for a valid file and **1** for
+an invalid or unreadable file; it does not import or change any settings.
+
+Validation catches incorrectly typed values that the importer might otherwise
+silently replace with defaults. It checks the file's format; use **Preview** in
+OmaCustos to check local source paths and authenticate Proton Drive before running
+a backup. An empty `sets` array is valid and clears the configured set list on import.
+
 ## Restore
 
 1. Press **Restore** on a backup in **Recent backups** that has a recorded run.
@@ -300,6 +374,12 @@ Build and test the native app from the repository root:
 cmake -S native -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+Run the standalone import-validator tests with:
+
+```bash
+python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
 The main binaries are `build/omacustos` and `build/omacustos-worker`. The Arch package
