@@ -141,6 +141,7 @@ QtObject {
 
     property QtObject recentBackupCopies: QtObject {
         property bool busy: false
+        property string deletingSetId: ""
         property string openedId: ""
         property string deleteRequestedId: ""
         property bool deleteConfirmed: false
@@ -155,7 +156,11 @@ QtObject {
             deleteRequestedId = setId
             deleteConfirmationReady("Documents", "/backups/documents-id/copy-id")
         }
-        function confirmDelete() { deleteConfirmed = true }
+        function confirmDelete() {
+            deleteConfirmed = true
+            deletingSetId = deleteRequestedId
+            busy = true
+        }
         function cancelDelete() { deleteCancelled = true }
     }
 

@@ -80,6 +80,7 @@ RowLayout {
                 required property int index
                 required property string modelData
                 readonly property bool runActive: dashboard.controller.runningSetIds.indexOf(dashboard.controller.setIds[index]) >= 0
+                readonly property bool deleting: dashboard.copies.deletingSetId === dashboard.controller.setIds[index]
                 width: dashboardSetsList.width
                 implicitHeight: Math.max(80, setSummary.implicitHeight + 32)
                 padding: 16
@@ -110,9 +111,10 @@ RowLayout {
 
                         Label {
                             objectName: "setRemainingTime-" + setRow.index
-                            text: dashboard.controller.remainingTimes[dashboard.controller.setIds[setRow.index]]
-                                || qsTr("Estimating time remaining…")
-                            visible: setRow.runActive
+                            text: setRow.deleting ? qsTr("Deleting backup copy…")
+                                : dashboard.controller.remainingTimes[dashboard.controller.setIds[setRow.index]]
+                                    || qsTr("Estimating time remaining…")
+                            visible: setRow.runActive || setRow.deleting
                             font.pixelSize: dashboard.style.metadataTypeSize
                             color: dashboard.style.mutedColor
                             wrapMode: Text.WordWrap
@@ -134,17 +136,17 @@ RowLayout {
                         ProgressBar {
                             objectName: "setProgressBar-" + setRow.index
                             readonly property var progress: dashboard.controller.transferProgress[dashboard.controller.setIds[setRow.index]] || ({})
-                            visible: setRow.runActive
-                            value: progress.fraction || 0
-                            indeterminate: progress.indeterminate === undefined || progress.indeterminate
-                            Accessible.name: qsTr("Backup work processed")
+                            visible: setRow.runActive || setRow.deleting
+                            value: setRow.deleting ? 0 : progress.fraction || 0
+                            indeterminate: setRow.deleting || progress.indeterminate === undefined || progress.indeterminate
+                            Accessible.name: setRow.deleting ? qsTr("Deleting backup copy") : qsTr("Backup work processed")
                             Layout.fillWidth: true
                         }
                     }
 
                     BusyIndicator {
                         objectName: "setBusy-" + setRow.index
-                        running: setRow.runActive
+                        running: setRow.runActive || setRow.deleting
                         visible: running
                         Layout.preferredWidth: 24
                         Layout.preferredHeight: 24
@@ -174,7 +176,7 @@ RowLayout {
 
                             MenuItem {
                                 text: qsTr("Back up now")
-                                enabled: setRow.index < dashboard.controller.setIds.length && !setRow.runActive
+                                enabled: setRow.index < dashboard.controller.setIds.length && !setRow.runActive && !setRow.deleting
                                 onTriggered: dashboard.launcher.startBackup(dashboard.controller.setIds[setRow.index])
                             }
 
@@ -234,6 +236,7 @@ RowLayout {
                 required property string modelData
                 readonly property string timestamp: dashboard.controller.recentBackupTimestamps[index] || ""
                 readonly property var details: dashboard.controller.runSummaries[dashboard.controller.recentBackupSetIds[index]] || ({})
+                readonly property bool deleting: dashboard.copies.deletingSetId === dashboard.controller.recentBackupSetIds[index]
                 width: recentBackupsList.width
                 implicitHeight: Math.max(80, recentText.implicitHeight + 40)
                 padding: 20
@@ -278,6 +281,23 @@ RowLayout {
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
+
+                        Label {
+                            objectName: "recentDeleteStatus-" + recentRow.index
+                            text: qsTr("Deleting backup copy…")
+                            visible: recentRow.deleting
+                            font.pixelSize: dashboard.style.metadataTypeSize
+                            color: dashboard.style.mutedColor
+                            Layout.fillWidth: true
+                        }
+                    }
+
+                    BusyIndicator {
+                        objectName: "recentDeleteBusy-" + recentRow.index
+                        running: recentRow.deleting
+                        visible: running
+                        Layout.preferredWidth: 24
+                        Layout.preferredHeight: 24
                     }
 
                     ActionButton {
@@ -301,6 +321,7 @@ RowLayout {
                         text: qsTr("Restore")
                         Layout.preferredHeight: 36
                             enabled: recentRow.timestamp.length > 0
+                            && !recentRow.deleting
                             && dashboard.controller.setIds.indexOf(dashboard.controller.recentBackupSetIds[recentRow.index]) >= 0
                         onClicked: dashboard.restoreRequested(recentRow.index)
                     }

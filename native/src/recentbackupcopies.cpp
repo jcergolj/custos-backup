@@ -187,6 +187,11 @@ bool RecentBackupCopies::busy() const
     return resolving;
 }
 
+QString RecentBackupCopies::deletingSetId() const
+{
+    return resolving && operation == Operation::Delete ? pending.setId : QString {};
+}
+
 void RecentBackupCopies::openCopy(const QString &setId)
 {
     start(Operation::Browse, setId);

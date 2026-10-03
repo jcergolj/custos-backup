@@ -89,6 +89,7 @@ void RecentBackupCopiesTest::confirmationDeletesOnlyItsExactCopyAndKeepsTheSet()
     QSignalSpy failure(&copies, &RecentBackupCopies::failed);
 
     copies.requestDelete(fixture.set.id);
+    QVERIFY(copies.deletingSetId().isEmpty());
     QTRY_COMPARE(warning.count(), 1);
     QCOMPARE(warning.first().at(1).toString(), fixture.path(QStringLiteral("recent")));
     QVERIFY(fixture.provider.trashed.isEmpty());
@@ -101,7 +102,9 @@ void RecentBackupCopiesTest::confirmationDeletesOnlyItsExactCopyAndKeepsTheSet()
     QTRY_COMPARE(warning.count(), 2);
     QVERIFY(fixture.copy(QStringLiteral("newer"), 1));
     copies.confirmDelete();
+    QCOMPARE(copies.deletingSetId(), fixture.set.id);
     QTRY_COMPARE(deleted.count(), 1);
+    QVERIFY(copies.deletingSetId().isEmpty());
     QVERIFY(failure.isEmpty());
     QCOMPARE(fixture.provider.trashed, QStringList {fixture.path(QStringLiteral("recent"))});
     QVERIFY(!QFileInfo::exists(fixture.remote.filePath(fixture.path(QStringLiteral("recent")))));
@@ -158,7 +161,9 @@ void RecentBackupCopiesTest::changedRunPointerPreventsDeletion()
     runs.find(fixture.set.id)->remoteCopyPath = fixture.path(QStringLiteral("replacement"));
     QVERIFY(runs.save());
     copies.confirmDelete();
+    QCOMPARE(copies.deletingSetId(), fixture.set.id);
     QTRY_COMPARE(failure.count(), 1);
+    QVERIFY(copies.deletingSetId().isEmpty());
     QVERIFY(failure.first().first().toString().contains(QStringLiteral("changed")));
     QVERIFY(fixture.provider.trashed.isEmpty());
 }

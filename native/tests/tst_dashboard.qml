@@ -86,6 +86,7 @@ TestCase {
         protonFolderBrowser.requestedPath = ""
         protonFolderBrowser.busy = false
         recentBackupCopies.busy = false
+        recentBackupCopies.deletingSetId = ""
         recentBackupCopies.openedId = ""
         recentBackupCopies.deleteRequestedId = ""
         recentBackupCopies.deleteConfirmed = false
@@ -746,8 +747,22 @@ TestCase {
         tryCompare(dialog, "opened", true)
         mouseClick(dialog.standardButton(Dialog.Ok))
         compare(recentBackupCopies.deleteConfirmed, true)
+        tryCompare(control("setBusy-0"), "running", true)
+        compare(control("setProgressBar-0").visible, true)
+        compare(control("setProgressBar-0").indeterminate, true)
+        compare(control("setRemainingTime-0").text, "Deleting backup copy…")
+        compare(control("recentDeleteBusy-1").running, true)
+        compare(control("recentDeleteStatus-1").visible, true)
+        compare(control("setBusy-1").running, false)
+        compare(control("recentDeleteBusy-0").running, false)
+        compare(control("restore-1").enabled, false)
+        recentBackupCopies.busy = false
+        recentBackupCopies.deletingSetId = ""
         recentBackupCopies.copyDeleted("documents-id")
         compare(backupSetController.refreshCount, 1)
+        tryCompare(control("setBusy-0"), "visible", false)
+        compare(control("setProgressBar-0").visible, false)
+        compare(control("recentDeleteBusy-1").visible, false)
     }
 
     function test_runningRecentCopyCannotBeDeleted() {

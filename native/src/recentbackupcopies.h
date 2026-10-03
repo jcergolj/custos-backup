@@ -18,11 +18,13 @@ class RecentBackupCopies final : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(QString deletingSetId READ deletingSetId NOTIFY busyChanged)
 
 public:
     RecentBackupCopies(BackupProvider &provider, QString configPath, QString computerName, QObject *parent = nullptr);
     ~RecentBackupCopies() override;
     bool busy() const;
+    QString deletingSetId() const;
     Q_INVOKABLE void openCopy(const QString &setId);
     Q_INVOKABLE void requestDelete(const QString &setId);
     Q_INVOKABLE void confirmDelete();
